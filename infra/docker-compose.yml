@@ -1,0 +1,79 @@
+# PWA demo POC — local stack (slice S0)
+# Codex #12: images pinned by digest-capable tags; single API worker (Codex #11).
+name: pwa-demo
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0.20
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/#' -C 1 -W 3 -h localhost || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  timescaledb:
+    image: timescale/timescaledb:2.17.2-pg16
+    environment:
+      POSTGRES_USER: pwa
+      POSTGRES_PASSWORD: pwa
+      POSTGRES_DB: pwa
+    ports:
+      - "5433:5432"          # 5433 on host: avoid a local Postgres already on 5432
+    volumes:
+      - ./db/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+      - tsdb-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pwa -d pwa"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: ../api
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+    environment:
+      DATABASE_URL: postgresql://pwa:pwa@timescaledb:5432/pwa
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      MQTT_ENABLED: "0"          # S2 flips this on; S0 skeleton runs broker-less
+    ports:
+      - "8000:8000"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  simulator:
+    build: ../simulator
+    command: python -m app.publish
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      RATE_HZ: "5"
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    profiles: ["sim"]            # started on demand (S1); not required for S0 health
+
+  web:
+    build: ../web
+    command: pnpm dev --host 0.0.0.0 --port 5173
+    environment:
+      VITE_API_BASE: http://localhost:8000
+    ports:
+      - "5173:5173"
+    profiles: ["ui"]            # started on demand (S4+); not required for S0 health
+
+volumes:
+  tsdb-data:
