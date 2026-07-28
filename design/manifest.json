@@ -128,15 +128,21 @@
         "thumbnail-only-512px",
         "proposal-illustration"
       ]
-    }
-  ],
-  "notGenerated": [
+    },
     {
       "key": "S9",
+      "screenId": "a750f192b6524efdb6ee6081b1d00cdb",
       "title": "AI Assistant (conversational)",
       "torRef": "ผนวก ๔ §2",
       "demoCritical": false,
-      "status": "generation-failed-2026-07-28 (Stitch 1800s hang); retry pending"
+      "png": "screens/S9-ai-assistant.png",
+      "html": "screens/S9-ai-assistant.html",
+      "issues": [
+        "fabricated-values",
+        "thumbnail-only-512px",
+        "proposal-illustration"
+      ]
     }
-  ]
+  ],
+  "notGenerated": []
 }
