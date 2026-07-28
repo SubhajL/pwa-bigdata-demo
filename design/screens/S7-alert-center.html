@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Alert Center · ระบบการแจ้งเตือน</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&amp;family=IBM+Plex+Sans+Thai:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "status-nodata": "#8A97A3",
+                        "surface-tint": "#0a60a6",
+                        "tertiary-fixed-dim": "#ffb783",
+                        "simulated-violet": "#7C3AED",
+                        "primary-fixed": "#d3e4ff",
+                        "on-secondary-fixed-variant": "#004f56",
+                        "primary-fixed-dim": "#a1c9ff",
+                        "surface-variant": "#d9e3f2",
+                        "status-normal": "#1E8E5A",
+                        "on-primary-container": "#c6ddff",
+                        "tertiary-fixed": "#ffdcc5",
+                        "on-surface": "#121c27",
+                        "on-error": "#ffffff",
+                        "on-error-container": "#93000a",
+                        "surface-container-high": "#dfe9f7",
+                        "error": "#ba1a1a",
+                        "inverse-surface": "#27313c",
+                        "on-secondary-fixed": "#001f23",
+                        "on-primary-fixed": "#001c38",
+                        "error-container": "#ffdad6",
+                        "card-white": "#FFFFFF",
+                        "on-secondary": "#ffffff",
+                        "status-critical": "#B42318",
+                        "primary-container": "#0f62a8",
+                        "on-tertiary": "#ffffff",
+                        "inverse-primary": "#a1c9ff",
+                        "surface-container-low": "#edf4ff",
+                        "surface-bright": "#f7f9ff",
+                        "surface-container-highest": "#d9e3f2",
+                        "surface": "#f7f9ff",
+                        "on-tertiary-fixed": "#301400",
+                        "status-warning": "#B7791F",
+                        "on-tertiary-fixed-variant": "#703700",
+                        "on-primary": "#ffffff",
+                        "border-subtle": "#C6D2DE",
+                        "on-tertiary-container": "#ffd2b4",
+                        "tertiary-container": "#964c00",
+                        "surface-container-lowest": "#ffffff",
+                        "on-secondary-container": "#006d77",
+                        "inverse-on-surface": "#e8f1ff",
+                        "secondary-fixed-dim": "#7cd4df",
+                        "outline-variant": "#c1c7d2",
+                        "secondary": "#006972",
+                        "tertiary": "#733900",
+                        "outline": "#717782",
+                        "canvas": "#F7F9FB",
+                        "secondary-container": "#96eef9",
+                        "on-surface-variant": "#414751",
+                        "on-primary-fixed-variant": "#004880",
+                        "primary": "#004a83",
+                        "secondary-fixed": "#98f0fb",
+                        "on-background": "#121c27",
+                        "surface-dim": "#d1dbe9",
+                        "surface-container": "#e5effd",
+                        "background": "#f7f9ff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "base": "4px",
+                        "table-cell-h": "16px",
+                        "container-max": "1440px",
+                        "table-cell-v": "12px",
+                        "card-padding": "24px",
+                        "gutter": "24px"
+                    },
+                    "fontFamily": {
+                        "label-caps": ["IBM Plex Sans", "IBM Plex Sans Thai", "sans-serif"],
+                        "body-reading": ["IBM Plex Sans", "IBM Plex Sans Thai", "sans-serif"],
+                        "body-dense": ["IBM Plex Sans", "IBM Plex Sans Thai", "sans-serif"],
+                        "title-sm": ["IBM Plex Sans", "IBM Plex Sans Thai", "sans-serif"],
+                        "metric-display": ["IBM Plex Sans", "sans-serif"],
+                        "headline-md": ["IBM Plex Sans", "IBM Plex Sans Thai", "sans-serif"],
+                        "headline-lg": ["IBM Plex Sans", "IBM Plex Sans Thai", "sans-serif"]
+                    },
+                    "fontSize": {
+                        "label-caps": ["12px", { "lineHeight": "1.0", "letterSpacing": "0.06em", "fontWeight": "600" }],
+                        "body-reading": ["16px", { "lineHeight": "1.65", "fontWeight": "400" }],
+                        "body-dense": ["14px", { "lineHeight": "1.55", "fontWeight": "400" }],
+                        "title-sm": ["18px", { "lineHeight": "1.4", "fontWeight": "600" }],
+                        "metric-display": ["34px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+                        "headline-md": ["24px", { "lineHeight": "1.3", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "headline-lg": ["32px", { "lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "700" }]
+                    },
+                    "boxShadow": {
+                        "card": "0 4px 20px -2px rgba(16, 26, 36, 0.06)"
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { background-color: #F7F9FB; }
+        .bento-card {
+            background-color: theme('colors.card-white');
+            border: 1px solid theme('colors.border-subtle');
+            border-radius: 16px;
+            box-shadow: theme('boxShadow.card');
+            position: relative;
+            overflow: hidden;
+        }
+        .simulated-pill {
+            background-color: theme('colors.simulated-violet');
+            color: white;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 9999px;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            z-index: 10;
+        }
+        .material-symbols-outlined {
+            font-family: 'Material Symbols Outlined';
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+</head>
+<body class="font-body-reading text-on-surface antialiased bg-canvas flex min-h-screen">
+<!-- SideNavBar -->
+<nav class="fixed left-0 top-0 h-full w-[240px] bg-surface dark:bg-on-background border-r border-border-subtle dark:border-outline flex flex-col py-6 px-4 z-50">
+<div class="mb-8 px-4">
+<h1 class="font-headline-md text-headline-md font-bold text-primary dark:text-primary-fixed">PWA Analytics</h1>
+<p class="font-label-caps text-label-caps text-on-surface-variant mt-1">Big Data Platform</p>
+</div>
+<ul class="flex flex-col gap-2">
+<li><a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed hover:bg-surface-container-low dark:hover:bg-surface-variant transition-colors duration-200 ease-in-out" href="#"><span class="material-symbols-outlined">dashboard</span> <span class="font-title-sm text-body-dense font-medium">Overview</span></a></li>
+<li><a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed hover:bg-surface-container-low dark:hover:bg-surface-variant transition-colors duration-200 ease-in-out" href="#"><span class="material-symbols-outlined">map</span> <span class="font-title-sm text-body-dense font-medium">Regional</span></a></li>
+<li><a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed hover:bg-surface-container-low dark:hover:bg-surface-variant transition-colors duration-200 ease-in-out" href="#"><span class="material-symbols-outlined">hub</span> <span class="font-title-sm text-body-dense font-medium">Branch</span></a></li>
+<li><a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed hover:bg-surface-container-low dark:hover:bg-surface-variant transition-colors duration-200 ease-in-out" href="#"><span class="material-symbols-outlined">check_circle</span> <span class="font-title-sm text-body-dense font-medium">Data Quality</span></a></li>
+<!-- Semantic Mapping: Prompt mentions "แจ้งเตือน is the active nav item" and "Report Center" is requested in prompt for nav list. We assume Report Center acts as the notifications area or we adapt. Let's use a bell icon and active state. -->
+<li><a class="flex items-center gap-3 px-4 py-3 rounded-lg text-primary dark:text-primary-fixed font-bold border-r-4 border-primary dark:border-primary-fixed bg-surface-container dark:bg-surface-variant transition-colors duration-200 ease-in-out" href="#"><span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">notifications</span> <span class="font-title-sm text-body-dense font-medium">Alert Center</span></a></li>
+<li><a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed hover:bg-surface-container-low dark:hover:bg-surface-variant transition-colors duration-200 ease-in-out" href="#"><span class="material-symbols-outlined">settings</span> <span class="font-title-sm text-body-dense font-medium">KPI Settings</span></a></li>
+</ul>
+</nav>
+<!-- Main Content Wrapper -->
+<div class="ml-[240px] w-[calc(100%-240px)] flex flex-col flex-1">
+<!-- TopNavBar -->
+<header class="sticky top-0 z-40 bg-canvas dark:bg-background border-b border-border-subtle dark:border-outline flex justify-between items-center h-16 px-8 transition-all duration-200">
+<h2 class="font-headline-md text-headline-md text-primary dark:text-primary-fixed">ศูนย์การแจ้งเตือน · Alert Center</h2>
+<div class="flex items-center gap-4">
+<button class="px-4 py-2 bg-surface-container-high hover:bg-surface-dim text-primary rounded-lg font-body-dense text-body-dense transition-colors border border-border-subtle">
+                    ทำเครื่องหมายอ่านทั้งหมด
+                </button>
+<button class="p-2 text-on-surface-variant hover:text-primary transition-colors flex items-center justify-center rounded-lg hover:bg-surface-container-low" title="ตั้งค่าการแจ้งเตือน">
+<span class="material-symbols-outlined">settings</span>
+</button>
+</div>
+</header>
+<!-- Main Canvas -->
+<main class="p-6 flex-1 max-w-container-max mx-auto w-full">
+<div class="grid grid-cols-12 gap-gutter">
+<!-- Section A: 4 Severity Summary Tiles -->
+<div class="col-span-12 grid grid-cols-4 gap-gutter mb-6">
+<div class="bento-card p-6">
+<div class="simulated-pill">SIMULATED</div>
+<div class="flex items-center gap-3 mb-4">
+<div class="w-10 h-10 rounded-full bg-error-container text-status-critical flex items-center justify-center">
+<span class="material-symbols-outlined">gpp_maybe</span>
+</div>
+<h3 class="font-label-caps text-label-caps text-on-surface-variant uppercase">วิกฤต · Critical</h3>
+</div>
+<div class="font-metric-display text-metric-display text-status-critical">3</div>
+</div>
+<div class="bento-card p-6">
+<div class="simulated-pill">SIMULATED</div>
+<div class="flex items-center gap-3 mb-4">
+<div class="w-10 h-10 rounded-full bg-tertiary-fixed text-status-warning flex items-center justify-center">
+<span class="material-symbols-outlined">warning</span>
+</div>
+<h3 class="font-label-caps text-label-caps text-on-surface-variant uppercase">เฝ้าระวัง · Warning</h3>
+</div>
+<div class="font-metric-display text-metric-display text-status-warning">8</div>
+</div>
+<div class="bento-card p-6">
+<div class="simulated-pill">SIMULATED</div>
+<div class="flex items-center gap-3 mb-4">
+<div class="w-10 h-10 rounded-full bg-primary-fixed text-primary-container flex items-center justify-center">
+<span class="material-symbols-outlined">info</span>
+</div>
+<h3 class="font-label-caps text-label-caps text-on-surface-variant uppercase">ปกติ/แจ้งข้อมูล · Info</h3>
+</div>
+<div class="font-metric-display text-metric-display text-primary-container">21</div>
+</div>
+<div class="bento-card p-6">
+<div class="simulated-pill">SIMULATED</div>
+<div class="flex items-center gap-3 mb-4">
+<div class="w-10 h-10 rounded-full bg-surface-dim text-status-nodata flex items-center justify-center">
+<span class="material-symbols-outlined">check</span>
+</div>
+<h3 class="font-label-caps text-label-caps text-on-surface-variant uppercase">รับทราบแล้ว · Acknowledged</h3>
+</div>
+<div class="font-metric-display text-metric-display text-status-nodata">12</div>
+</div>
+</div>
+<!-- Section B: Alert Feed (8 Columns) -->
+<div class="col-span-12 md:col-span-8 bento-card p-6 flex flex-col">
+<div class="simulated-pill">SIMULATED</div>
+<div class="flex justify-between items-center mb-6">
+<h3 class="font-title-sm text-title-sm text-on-surface">รายการแจ้งเตือน · Alert Feed</h3>
+<div class="flex gap-2">
+<button class="px-3 py-1 bg-primary text-on-primary rounded-full font-body-dense text-[12px] border border-primary">ทั้งหมด</button>
+<button class="px-3 py-1 bg-surface text-on-surface-variant rounded-full font-body-dense text-[12px] border border-border-subtle hover:bg-surface-container-low transition-colors">วิกฤต</button>
+<button class="px-3 py-1 bg-surface text-on-surface-variant rounded-full font-body-dense text-[12px] border border-border-subtle hover:bg-surface-container-low transition-colors">เฝ้าระวัง</button>
+<button class="px-3 py-1 bg-surface text-on-surface-variant rounded-full font-body-dense text-[12px] border border-border-subtle hover:bg-surface-container-low transition-colors">ตามระดับ</button>
+</div>
+</div>
+<div class="flex flex-col gap-4">
+<!-- Alert Item 1 (CRITICAL) -->
+<div class="flex bg-surface-bright rounded-lg border border-border-subtle overflow-hidden hover:bg-surface-container-lowest transition-colors group">
+<div class="w-1 bg-status-critical flex-shrink-0"></div>
+<div class="flex-1 p-4 flex gap-4">
+<div class="text-status-critical pt-1"><span class="material-symbols-outlined">gpp_maybe</span></div>
+<div class="flex-1">
+<div class="font-body-reading text-body-reading font-semibold text-on-surface mb-1">ปั๊ม P-2 สมุทรสาคร: ค่า SEC สูงผิดปกติ (0.42 kWh/m³)</div>
+<div class="font-body-dense text-body-dense text-on-surface-variant mb-2">ระบบ AI ตรวจพบแนวโน้มขัดข้อง</div>
+<div class="font-body-dense text-[12px] text-outline">แหล่ง: SCADA · 2 นาทีที่แล้ว</div>
+</div>
+<div class="flex flex-col justify-between items-end">
+<span class="px-2 py-1 bg-surface-dim text-on-surface-variant rounded text-[11px] font-semibold tracking-wide uppercase">ระดับ: Operator + Branch</span>
+<button class="px-4 py-1.5 border border-border-subtle rounded text-primary font-body-dense text-body-dense hover:bg-primary-container hover:text-white transition-colors">รับทราบ</button>
+</div>
+</div>
+</div>
+<!-- Alert Item 2 (CRITICAL) -->
+<div class="flex bg-surface-bright rounded-lg border border-border-subtle overflow-hidden hover:bg-surface-container-lowest transition-colors group">
+<div class="w-1 bg-status-critical flex-shrink-0"></div>
+<div class="flex-1 p-4 flex gap-4">
+<div class="text-status-critical pt-1"><span class="material-symbols-outlined">gpp_maybe</span></div>
+<div class="flex-1">
+<div class="font-body-reading text-body-reading font-semibold text-on-surface mb-1">DMA-03 สิงห์บุรี: แรงดันตกต่ำกว่าเกณฑ์</div>
+<div class="font-body-dense text-body-dense text-on-surface-variant mb-2">กระทบผู้ใช้น้ำ 1,284 ราย</div>
+<div class="font-body-dense text-[12px] text-outline">แหล่ง: DMAMA · 5 นาทีที่แล้ว</div>
+</div>
+<div class="flex flex-col justify-between items-end">
+<span class="px-2 py-1 bg-surface-dim text-on-surface-variant rounded text-[11px] font-semibold tracking-wide uppercase">ระดับ: Branch + Regional</span>
+<button class="px-4 py-1.5 border border-border-subtle rounded text-primary font-body-dense text-body-dense hover:bg-primary-container hover:text-white transition-colors">รับทราบ</button>
+</div>
+</div>
+</div>
+<!-- Alert Item 3 (WARNING) -->
+<div class="flex bg-surface-bright rounded-lg border border-border-subtle overflow-hidden hover:bg-surface-container-lowest transition-colors group">
+<div class="w-1 bg-status-warning flex-shrink-0"></div>
+<div class="flex-1 p-4 flex gap-4">
+<div class="text-status-warning pt-1"><span class="material-symbols-outlined">warning</span></div>
+<div class="flex-1">
+<div class="font-body-reading text-body-reading font-semibold text-on-surface mb-1">กปภ.สาขาสิงห์บุรี: NRW 38.7% เกินเกณฑ์ 35%</div>
+<div class="font-body-dense text-body-dense text-on-surface-variant mb-2">สูงต่อเนื่อง 3 เดือน</div>
+<div class="font-body-dense text-[12px] text-outline">แหล่ง: Analytics · 1 ชม.ที่แล้ว</div>
+</div>
+<div class="flex flex-col justify-between items-end">
+<span class="px-2 py-1 bg-surface-dim text-on-surface-variant rounded text-[11px] font-semibold tracking-wide uppercase">ระดับ: Regional</span>
+<button class="px-4 py-1.5 border border-border-subtle rounded text-primary font-body-dense text-body-dense hover:bg-primary-container hover:text-white transition-colors">รับทราบ</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Section C: Sidebar Tools (4 Columns) -->
+<div class="col-span-12 md:col-span-4 flex flex-col gap-6">
+<!-- Alert Rules Card -->
+<div class="bento-card p-6">
+<div class="simulated-pill">SIMULATED</div>
+<h3 class="font-title-sm text-title-sm text-on-surface mb-4">กฎการแจ้งเตือน · Alert Rules</h3>
+<div class="flex flex-col gap-3">
+<div class="flex justify-between items-center py-2 border-b border-border-subtle last:border-0">
+<div class="flex flex-col">
+<span class="font-body-dense text-body-dense font-medium text-on-surface">NRW &gt; 35% → แจ้ง ผอ.เขต</span>
+<div class="flex gap-2 text-outline mt-1">
+<span class="material-symbols-outlined text-[16px]">mail</span>
+<span class="material-symbols-outlined text-[16px]">chat</span>
+</div>
+</div>
+<!-- Simple toggle mock -->
+<div class="w-10 h-6 bg-primary rounded-full relative cursor-pointer">
+<div class="w-4 h-4 bg-white rounded-full absolute right-1 top-1 shadow-sm"></div>
+</div>
+</div>
+<div class="flex justify-between items-center py-2 border-b border-border-subtle last:border-0">
+<div class="flex flex-col">
+<span class="font-body-dense text-body-dense font-medium text-on-surface">แรงดัน &lt; 1.5 บาร์ → แจ้ง Operator</span>
+<div class="flex gap-2 text-outline mt-1">
+<span class="material-symbols-outlined text-[16px]">mail</span>
+<span class="material-symbols-outlined text-[16px]">chat</span>
+</div>
+</div>
+<div class="w-10 h-6 bg-primary rounded-full relative cursor-pointer">
+<div class="w-4 h-4 bg-white rounded-full absolute right-1 top-1 shadow-sm"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- Delivery Channels -->
+<div class="bento-card p-6">
+<h3 class="font-title-sm text-title-sm text-on-surface mb-4">ช่องทางการแจ้งเตือน · Channels</h3>
+<div class="flex flex-col gap-3">
+<div class="flex items-center gap-3">
+<div class="w-2 h-2 rounded-full bg-status-normal"></div>
+<span class="font-body-dense text-body-dense text-on-surface-variant flex-1">Email</span>
+<span class="font-body-dense text-body-dense text-status-normal">เชื่อมต่อ</span>
+</div>
+<div class="flex items-center gap-3">
+<div class="w-2 h-2 rounded-full bg-status-normal"></div>
+<span class="font-body-dense text-body-dense text-on-surface-variant flex-1">LINE Notify</span>
+<span class="font-body-dense text-body-dense text-status-normal">เชื่อมต่อ</span>
+</div>
+<div class="flex items-center gap-3">
+<div class="w-2 h-2 rounded-full bg-status-nodata"></div>
+<span class="font-body-dense text-body-dense text-on-surface-variant flex-1">SMS</span>
+<span class="font-body-dense text-body-dense text-status-nodata">ปิดใช้งาน</span>
+</div>
+</div>
+</div>
+<!-- AI Summary -->
+<div class="bento-card p-4 border-l-4 border-l-secondary-fixed bg-[#f0fbfa]">
+<div class="simulated-pill">SIMULATED</div>
+<div class="flex gap-3">
+<div class="text-secondary mt-1">
+<span class="material-symbols-outlined">smart_toy</span>
+</div>
+<div>
+<h4 class="font-title-sm text-body-dense font-semibold text-on-surface mb-1">การจัดหมวดหมู่โดย AI</h4>
+<p class="font-body-dense text-body-dense text-on-surface-variant">AI จัดหมวดหมู่อัตโนมัติเป็น ปกติ / เฝ้าระวัง / วิกฤต</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer Component from JSON Context -->
+<footer class="mt-auto bg-surface-container-lowest dark:bg-on-background border-t border-border-subtle dark:border-outline flex flex-row justify-between items-center px-8 p-4 transition-opacity duration-150">
+<div class="font-label-caps text-label-caps uppercase tracking-widest text-on-surface-variant dark:text-outline-variant">
+                © Provincial Waterworks Authority Data Trust Protocol
+            </div>
+<div class="flex gap-6">
+<a class="font-body-dense text-body-dense text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed underline" href="#">Data Security Policy</a>
+<a class="font-body-dense text-body-dense text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed underline" href="#">System Status</a>
+<a class="font-body-dense text-body-dense text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed underline" href="#">Contact Support</a>
+</div>
+</footer>
+</div>
+</body></html>

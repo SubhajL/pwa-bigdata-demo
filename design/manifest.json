@@ -76,38 +76,67 @@
         "thumbnail-only-512px",
         "design-target-only-needs-code"
       ]
-    }
-  ],
-  "notGenerated": [
+    },
     {
       "key": "S3",
-      "title": "Branch Manager dashboard",
+      "title": "Branch Manager (Sing Buri)",
       "torRef": "ผนวก ๗",
-      "demoCritical": false
+      "demoCritical": false,
+      "png": "screens/S3-branch-singburi.png",
+      "html": "screens/S3-branch-singburi.html",
+      "issues": [
+        "fabricated-values",
+        "thumbnail-only-512px",
+        "proposal-illustration"
+      ]
     },
     {
       "key": "S5",
       "title": "System Admin",
       "torRef": "ผนวก ๙",
-      "demoCritical": false
+      "demoCritical": false,
+      "png": "screens/S5-admin.png",
+      "html": "screens/S5-admin.html",
+      "issues": [
+        "fabricated-values",
+        "thumbnail-only-512px",
+        "proposal-illustration"
+      ]
     },
     {
       "key": "S6",
       "title": "Report Center",
       "torRef": "ผนวก ๑๐",
-      "demoCritical": false
+      "demoCritical": false,
+      "png": "screens/S6-report-center.png",
+      "html": "screens/S6-report-center.html",
+      "issues": [
+        "fabricated-values",
+        "thumbnail-only-512px",
+        "proposal-illustration"
+      ]
     },
     {
       "key": "S7",
       "title": "Notification / Alert Center",
       "torRef": "ผนวก ๑๑",
-      "demoCritical": false
-    },
+      "demoCritical": false,
+      "png": "screens/S7-alert-center.png",
+      "html": "screens/S7-alert-center.html",
+      "issues": [
+        "fabricated-values",
+        "thumbnail-only-512px",
+        "proposal-illustration"
+      ]
+    }
+  ],
+  "notGenerated": [
     {
       "key": "S9",
       "title": "AI Assistant (conversational)",
       "torRef": "ผนวก ๔ §2",
-      "demoCritical": false
+      "demoCritical": false,
+      "status": "generation-failed-2026-07-28 (Stitch 1800s hang); retry pending"
     }
   ]
 }

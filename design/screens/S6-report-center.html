@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>ระบบจัดทำรายงาน · Report Center | PWA Analytics</title>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- IBM Plex Sans (used for Thai characters in this mockup as per prompt instructions, though technically it's a Latin font, we use it as requested for consistency) -->
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "inverse-on-surface": "#e8f1ff",
+                        "status-warning": "#B7791F",
+                        "on-primary-container": "#c6ddff",
+                        "on-surface": "#121c27",
+                        "on-secondary-container": "#006d77",
+                        "on-error": "#ffffff",
+                        "inverse-surface": "#27313c",
+                        "outline": "#717782",
+                        "surface-container-low": "#edf4ff",
+                        "card-white": "#FFFFFF",
+                        "primary": "#004a83",
+                        "secondary-fixed-dim": "#7cd4df",
+                        "on-error-container": "#93000a",
+                        "on-secondary-fixed-variant": "#004f56",
+                        "simulated-violet": "#7C3AED",
+                        "on-primary-fixed-variant": "#004880",
+                        "status-normal": "#1E8E5A",
+                        "on-surface-variant": "#414751",
+                        "canvas": "#F7F9FB",
+                        "error-container": "#ffdad6",
+                        "surface-dim": "#d1dbe9",
+                        "tertiary-fixed-dim": "#ffb783",
+                        "surface-container-high": "#dfe9f7",
+                        "surface-variant": "#d9e3f2",
+                        "surface-container-highest": "#d9e3f2",
+                        "on-secondary": "#ffffff",
+                        "secondary": "#006972",
+                        "on-primary": "#ffffff",
+                        "on-tertiary-fixed": "#301400",
+                        "on-background": "#121c27",
+                        "outline-variant": "#c1c7d2",
+                        "tertiary-container": "#964c00",
+                        "status-nodata": "#8A97A3",
+                        "on-tertiary-container": "#ffd2b4",
+                        "tertiary-fixed": "#ffdcc5",
+                        "surface-container": "#e5effd",
+                        "primary-fixed": "#d3e4ff",
+                        "surface": "#f7f9ff",
+                        "status-critical": "#B42318",
+                        "tertiary": "#733900",
+                        "background": "#f7f9ff",
+                        "surface-bright": "#f7f9ff",
+                        "primary-fixed-dim": "#a1c9ff",
+                        "on-primary-fixed": "#001c38",
+                        "secondary-fixed": "#98f0fb",
+                        "secondary-container": "#96eef9",
+                        "surface-tint": "#0a60a6",
+                        "surface-container-lowest": "#ffffff",
+                        "primary-container": "#0f62a8",
+                        "on-secondary-fixed": "#001f23",
+                        "inverse-primary": "#a1c9ff",
+                        "border-subtle": "#C6D2DE",
+                        "on-tertiary-fixed-variant": "#703700",
+                        "on-tertiary": "#ffffff",
+                        "error": "#ba1a1a"
+                    },
+                    borderRadius: {
+                        DEFAULT: "0.25rem",
+                        lg: "0.5rem",
+                        xl: "0.75rem",
+                        full: "9999px"
+                    },
+                    spacing: {
+                        "table-cell-v": "12px",
+                        "gutter": "24px",
+                        "card-padding": "24px",
+                        "table-cell-h": "16px",
+                        "base": "4px",
+                        "container-max": "1440px"
+                    },
+                    fontFamily: {
+                        "headline-md": ["IBM Plex Sans"],
+                        "metric-display": ["IBM Plex Sans"],
+                        "label-caps": ["IBM Plex Sans"],
+                        "body-reading": ["IBM Plex Sans"],
+                        "title-sm": ["IBM Plex Sans"],
+                        "body-dense": ["IBM Plex Sans"],
+                        "headline-lg": ["IBM Plex Sans"]
+                    },
+                    fontSize: {
+                        "headline-md": ["24px", { lineHeight: "1.3", letterSpacing: "-0.01em", fontWeight: "600" }],
+                        "metric-display": ["34px", { lineHeight: "1.1", letterSpacing: "-0.02em", fontWeight: "600" }],
+                        "label-caps": ["12px", { lineHeight: "1.0", letterSpacing: "0.06em", fontWeight: "600" }],
+                        "body-reading": ["16px", { lineHeight: "1.65", fontWeight: "400" }],
+                        "title-sm": ["18px", { lineHeight: "1.4", fontWeight: "600" }],
+                        "body-dense": ["14px", { lineHeight: "1.55", fontWeight: "400" }],
+                        "headline-lg": ["32px", { lineHeight: "1.2", letterSpacing: "-0.02em", fontWeight: "700" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .bento-card {
+            border: 1px solid #C6D2DE;
+            box-shadow: 0 4px 20px -2px rgba(16, 26, 36, 0.06);
+            border-radius: 16px;
+            background-color: #FFFFFF;
+        }
+        .tabular-nums { font-variant-numeric: tabular-nums; }
+    </style>
+</head>
+<body class="bg-canvas text-on-surface font-body-reading antialiased min-h-screen flex">
+<!-- SideNavBar (Shared Component) -->
+<nav class="bg-surface dark:bg-on-background fixed left-0 top-0 h-full w-[240px] border-r border-border-subtle dark:border-outline flex flex-col py-6 px-4 z-50">
+<div class="mb-8 px-2">
+<h1 class="font-headline-md text-headline-md font-bold text-primary dark:text-primary-fixed">PWA Analytics</h1>
+<p class="font-label-caps text-label-caps text-on-surface-variant mt-1">Big Data Platform</p>
+</div>
+<div class="flex-1 space-y-2">
+<!-- Simulated Nav Items -->
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed hover:bg-surface-container-low dark:hover:bg-surface-variant transition-colors duration-200 ease-in-out rounded-md" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="font-title-sm text-title-sm">Overview</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed hover:bg-surface-container-low dark:hover:bg-surface-variant transition-colors duration-200 ease-in-out rounded-md" href="#">
+<span class="material-symbols-outlined">map</span>
+<span class="font-title-sm text-title-sm">Regional</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed hover:bg-surface-container-low dark:hover:bg-surface-variant transition-colors duration-200 ease-in-out rounded-md" href="#">
+<span class="material-symbols-outlined">hub</span>
+<span class="font-title-sm text-title-sm">Branch</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed hover:bg-surface-container-low dark:hover:bg-surface-variant transition-colors duration-200 ease-in-out rounded-md" href="#">
+<span class="material-symbols-outlined">check_circle</span>
+<span class="font-title-sm text-title-sm">Data Quality</span>
+</a>
+<!-- Active Nav Item based on intent -->
+<a class="flex items-center gap-3 px-3 py-2 text-primary dark:text-primary-fixed font-bold border-r-4 border-primary dark:border-primary-fixed bg-surface-container dark:bg-surface-variant transition-colors duration-200 ease-in-out rounded-l-md" href="#">
+<span class="material-symbols-outlined">description</span>
+<span class="font-title-sm text-title-sm">Report Center</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed hover:bg-surface-container-low dark:hover:bg-surface-variant transition-colors duration-200 ease-in-out rounded-md" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-title-sm text-title-sm">KPI Settings</span>
+</a>
+</div>
+</nav>
+<!-- Main Content Area -->
+<div class="ml-[240px] flex-1 flex flex-col min-h-screen">
+<!-- TopNavBar -->
+<header class="bg-canvas dark:bg-background sticky top-0 z-40 border-b border-border-subtle dark:border-outline flex justify-between items-center h-16 px-8">
+<h2 class="font-headline-md text-headline-md font-bold text-primary dark:text-primary-fixed">ระบบจัดทำรายงาน · Report Center</h2>
+<div class="flex items-center gap-4">
+<button class="bg-primary text-on-primary px-4 py-2 rounded font-title-sm text-title-sm flex items-center gap-2 hover:bg-primary-container transition-colors">
+<span class="material-symbols-outlined text-sm">add</span> สร้างรายงานใหม่
+                </button>
+<button class="text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined">account_circle</span>
+</button>
+</div>
+</header>
+<!-- Main Canvas -->
+<main class="p-8 max-w-[1440px] mx-auto w-full flex-1">
+<div class="grid grid-cols-12 gap-gutter">
+<!-- Section A: Templates (Full Width - 12 cols) -->
+<section class="col-span-12 mb-4">
+<h3 class="font-title-sm text-title-sm mb-4 text-on-surface">เลือกรูปแบบรายงาน · Report Templates</h3>
+<div class="grid grid-cols-3 gap-gutter">
+<!-- Template 1 -->
+<div class="bento-card p-6 cursor-pointer hover:border-primary transition-colors">
+<div class="flex items-start gap-4">
+<div class="bg-surface-container-low p-3 rounded-full text-primary">
+<span class="material-symbols-outlined">description</span>
+</div>
+<div>
+<h4 class="font-title-sm text-title-sm font-semibold">รายงานสรุปผู้บริหาร</h4>
+<p class="font-body-dense text-body-dense text-on-surface-variant">Executive Summary</p>
+<p class="font-label-caps text-label-caps text-outline mt-2">Strategic KPI: ผลิต-จ่าย, NRW, พลังงาน</p>
+</div>
+</div>
+</div>
+<!-- Template 2 (Selected) -->
+<div class="bento-card p-6 cursor-pointer border-primary border-2 shadow-sm relative">
+<div class="absolute top-4 right-4 text-primary">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+<div class="flex items-start gap-4">
+<div class="bg-primary-container p-3 rounded-full text-on-primary-container">
+<span class="material-symbols-outlined">layers</span>
+</div>
+<div>
+<h4 class="font-title-sm text-title-sm font-semibold text-primary">รายงานตามลำดับชั้น</h4>
+<p class="font-body-dense text-body-dense text-primary">Hierarchical</p>
+<p class="font-label-caps text-label-caps text-primary/80 mt-2">องค์กร / เขต / สาขา</p>
+</div>
+</div>
+</div>
+<!-- Template 3 -->
+<div class="bento-card p-6 cursor-pointer hover:border-primary transition-colors">
+<div class="flex items-start gap-4">
+<div class="bg-surface-container-low p-3 rounded-full text-primary">
+<span class="material-symbols-outlined">biotech</span>
+</div>
+<div>
+<h4 class="font-title-sm text-title-sm font-semibold">รายงานวิเคราะห์เชิงลึก</h4>
+<p class="font-body-dense text-body-dense text-on-surface-variant">Deep Analysis</p>
+<p class="font-label-caps text-label-caps text-outline mt-2">Pump Efficiency, สารเคมี, Demand Forecast</p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Row 2 -->
+<!-- Section B - Left (4 cols) Filters -->
+<div class="col-span-12 md:col-span-4 bento-card p-6 flex flex-col h-full">
+<h3 class="font-title-sm text-title-sm font-semibold mb-6">ตัวกรอง · Report Filters</h3>
+<div class="space-y-6 flex-1">
+<!-- Date Range -->
+<div>
+<label class="block font-label-caps text-label-caps text-on-surface-variant mb-2">ช่วงเวลา</label>
+<div class="flex items-center border border-border-subtle rounded px-3 py-2 bg-surface-bright focus-within:border-primary transition-colors">
+<span class="material-symbols-outlined text-outline mr-2 text-sm">calendar_month</span>
+<input class="w-full bg-transparent border-none p-0 focus:ring-0 font-body-dense text-body-dense outline-none" readonly="" type="text" value="ต.ค. 2568 – ธ.ค. 2568"/>
+</div>
+</div>
+<!-- Area -->
+<div>
+<label class="block font-label-caps text-label-caps text-on-surface-variant mb-2">พื้นที่</label>
+<div class="flex items-center border border-border-subtle rounded px-3 py-2 bg-surface-bright focus-within:border-primary transition-colors">
+<span class="material-symbols-outlined text-outline mr-2 text-sm">map</span>
+<select class="w-full bg-transparent border-none p-0 focus:ring-0 font-body-dense text-body-dense outline-none appearance-none">
+<option>กปภ.เขต 2</option>
+</select>
+<span class="material-symbols-outlined text-outline ml-2 text-sm pointer-events-none">arrow_drop_down</span>
+</div>
+</div>
+<!-- Level -->
+<div>
+<label class="block font-label-caps text-label-caps text-on-surface-variant mb-2">ระดับ</label>
+<div class="flex rounded border border-border-subtle overflow-hidden">
+<button class="flex-1 py-2 font-body-dense text-body-dense text-on-surface-variant hover:bg-surface-container-low transition-colors">องค์กร</button>
+<button class="flex-1 py-2 font-body-dense text-body-dense bg-primary text-on-primary font-semibold">เขต</button>
+<button class="flex-1 py-2 font-body-dense text-body-dense text-on-surface-variant hover:bg-surface-container-low transition-colors">สาขา</button>
+</div>
+</div>
+<!-- KPI Chips -->
+<div>
+<label class="block font-label-caps text-label-caps text-on-surface-variant mb-2">ประเภท KPI</label>
+<div class="flex flex-wrap gap-2">
+<span class="px-3 py-1 bg-secondary-container text-on-secondary-container font-body-dense text-body-dense rounded-full cursor-pointer border border-transparent">ปริมาณจำหน่าย</span>
+<span class="px-3 py-1 bg-secondary-container text-on-secondary-container font-body-dense text-body-dense rounded-full cursor-pointer border border-transparent">NRW</span>
+<span class="px-3 py-1 bg-secondary-container text-on-secondary-container font-body-dense text-body-dense rounded-full cursor-pointer border border-transparent">พลังงาน</span>
+<span class="px-3 py-1 bg-surface text-outline border border-border-subtle font-body-dense text-body-dense rounded-full cursor-pointer hover:bg-surface-container-low transition-colors">+ เพิ่มเติม</span>
+</div>
+</div>
+</div>
+<div class="mt-8 pt-4 border-t border-border-subtle space-y-3">
+<button class="w-full bg-primary text-on-primary py-2 rounded font-title-sm text-title-sm hover:bg-primary-container transition-colors shadow-sm">
+                            ประมวลผลรายงาน
+                        </button>
+<button class="w-full bg-surface-container-low text-primary py-2 rounded font-body-dense text-body-dense hover:bg-surface-variant transition-colors border border-primary-fixed-dim">
+                            ตั้งเวลาส่งอัตโนมัติ
+                        </button>
+</div>
+</div>
+<!-- Section B - Right (8 cols) Preview -->
+<div class="col-span-12 md:col-span-8 bento-card p-8 bg-surface-container-lowest">
+<div class="flex justify-between items-start mb-8 border-b border-border-subtle pb-4">
+<h3 class="font-headline-md text-headline-md font-bold text-on-surface">รายงานผลการดำเนินงาน กปภ.เขต 2 · ธ.ค. 2568</h3>
+<div class="flex gap-2">
+<button class="flex items-center gap-1 px-2 py-1 bg-surface-container-low text-primary rounded font-label-caps text-label-caps border border-primary-fixed-dim hover:bg-surface-variant transition-colors">
+<span class="material-symbols-outlined text-[16px]">picture_as_pdf</span> PDF
+                            </button>
+<button class="flex items-center gap-1 px-2 py-1 bg-surface-container-low text-status-normal rounded font-label-caps text-label-caps border border-[#bbf7d0] hover:bg-[#dcfce7] transition-colors">
+<span class="material-symbols-outlined text-[16px]">table</span> XLSX
+                            </button>
+<button class="flex items-center gap-1 px-2 py-1 bg-surface-container-low text-on-surface-variant rounded font-label-caps text-label-caps border border-border-subtle hover:bg-surface-variant transition-colors">
+<span class="material-symbols-outlined text-[16px]">csv</span> CSV
+                            </button>
+</div>
+</div>
+<!-- Mini KPI Row in Preview -->
+<div class="grid grid-cols-3 gap-6 mb-8">
+<!-- KPI 1 -->
+<div class="bg-canvas border border-border-subtle rounded-lg p-4">
+<p class="font-label-caps text-label-caps text-on-surface-variant mb-1">ปริมาณจำหน่าย</p>
+<div class="flex items-baseline gap-2">
+<span class="font-metric-display text-metric-display text-on-surface tabular-nums">21,515,813</span>
+<span class="font-body-dense text-body-dense text-outline">ลบ.ม.</span>
+</div>
+</div>
+<!-- KPI 2 -->
+<div class="bg-canvas border border-border-subtle rounded-lg p-4 relative">
+<span class="absolute top-2 right-2 bg-simulated-violet text-white px-2 py-0.5 rounded text-[10px] font-bold tracking-wider">SIMULATED</span>
+<p class="font-label-caps text-label-caps text-on-surface-variant mb-1">NRW</p>
+<div class="flex items-baseline gap-2">
+<span class="font-metric-display text-metric-display text-on-surface tabular-nums">29.7</span>
+<span class="font-body-dense text-body-dense text-outline">%</span>
+</div>
+</div>
+<!-- KPI 3 -->
+<div class="bg-canvas border border-border-subtle rounded-lg p-4 relative">
+<span class="absolute top-2 right-2 bg-simulated-violet text-white px-2 py-0.5 rounded text-[10px] font-bold tracking-wider">SIMULATED</span>
+<p class="font-label-caps text-label-caps text-on-surface-variant mb-1">พลังงาน</p>
+<div class="flex items-baseline gap-2">
+<span class="font-metric-display text-metric-display text-on-surface tabular-nums">฿48.2</span>
+<span class="font-body-dense text-body-dense text-outline">M</span>
+</div>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-8">
+<!-- Chart Placeholder -->
+<div>
+<h4 class="font-title-sm text-title-sm font-semibold mb-4 text-on-surface">เปรียบเทียบสาขา</h4>
+<div class="h-48 border-l border-b border-border-subtle relative flex items-end justify-between px-2 pb-1">
+<!-- Simple CSS Bar Chart Mockup -->
+<div class="w-8 bg-primary/20 h-[30%]"></div>
+<div class="w-8 bg-primary/40 h-[50%]"></div>
+<div class="w-8 bg-primary/60 h-[70%]"></div>
+<div class="w-8 bg-primary/80 h-[90%]"></div>
+<div class="w-8 bg-primary h-[100%]"></div>
+</div>
+</div>
+<!-- Mini Table Placeholder -->
+<div>
+<h4 class="font-title-sm text-title-sm font-semibold mb-4 text-on-surface">เทียบเป้าหมาย</h4>
+<table class="w-full text-left font-body-dense text-body-dense border-collapse">
+<thead>
+<tr class="border-b border-border-subtle text-on-surface-variant font-label-caps text-label-caps">
+<th class="pb-2 font-normal">ตัวชี้วัด</th>
+<th class="pb-2 font-normal text-right">Actual</th>
+<th class="pb-2 font-normal text-right">Target</th>
+<th class="pb-2 font-normal text-center">Status</th>
+</tr>
+</thead>
+<tbody>
+<tr class="border-b border-border-subtle/50">
+<td class="py-2">ผลิตน้ำ</td>
+<td class="py-2 text-right tabular-nums">98%</td>
+<td class="py-2 text-right tabular-nums text-outline">95%</td>
+<td class="py-2 text-center text-status-normal"><span class="material-symbols-outlined text-[16px]">check_circle</span></td>
+</tr>
+<tr class="border-b border-border-subtle/50 bg-canvas/50">
+<td class="py-2">NRW</td>
+<td class="py-2 text-right tabular-nums">31%</td>
+<td class="py-2 text-right tabular-nums text-outline">28%</td>
+<td class="py-2 text-center text-status-critical"><span class="material-symbols-outlined text-[16px]">cancel</span></td>
+</tr>
+<tr>
+<td class="py-2">รายได้</td>
+<td class="py-2 text-right tabular-nums">102%</td>
+<td class="py-2 text-right tabular-nums text-outline">100%</td>
+<td class="py-2 text-center text-status-normal"><span class="material-symbols-outlined text-[16px]">check_circle</span></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer (Shared Component) -->
+<footer class="bg-surface-container-lowest dark:bg-on-background border-t border-border-subtle dark:border-outline flex flex-row justify-between items-center px-8 p-4 mt-auto">
+<span class="font-body-dense text-body-dense text-on-surface-variant dark:text-outline-variant">© Provincial Waterworks Authority Data Trust Protocol</span>
+<div class="flex gap-6">
+<a class="font-body-dense text-body-dense text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed underline transition-opacity duration-150" href="#">Data Security Policy</a>
+<a class="font-body-dense text-body-dense text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed underline transition-opacity duration-150" href="#">System Status</a>
+<a class="font-body-dense text-body-dense text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed underline transition-opacity duration-150" href="#">Contact Support</a>
+</div>
+</footer>
+</div>
+</body></html>
