@@ -1,0 +1,3 @@
+source_file,row,defect,detail
+f40db0dc-704f-4201-bd97-04ec77710ba0.xlsx,236,orphan_row_missing_key,region=None branch=None month=None volume=124652359.33
+<dataset>,-,duplicate_identical_rows,"234 rows dropped (all 2023-01, byte-identical)"

@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+
+<html class="light" lang="th"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>คุณภาพข้อมูลและ Data Pipeline · Data Pipeline &amp; Quality</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-variant": "#d9e3f2",
+                        "error": "#ba1a1a",
+                        "simulated-violet": "#7C3AED",
+                        "on-background": "#121c27",
+                        "on-tertiary-container": "#ffd2b4",
+                        "on-tertiary-fixed-variant": "#703700",
+                        "on-surface-variant": "#414751",
+                        "inverse-surface": "#27313c",
+                        "status-nodata": "#8A97A3",
+                        "on-primary": "#ffffff",
+                        "outline-variant": "#c1c7d2",
+                        "error-container": "#ffdad6",
+                        "surface-bright": "#f7f9ff",
+                        "primary-container": "#0f62a8",
+                        "surface-dim": "#d1dbe9",
+                        "status-critical": "#B42318",
+                        "primary-fixed-dim": "#a1c9ff",
+                        "surface-container-highest": "#d9e3f2",
+                        "on-error-container": "#93000a",
+                        "inverse-on-surface": "#e8f1ff",
+                        "tertiary-fixed-dim": "#ffb783",
+                        "surface-container-lowest": "#ffffff",
+                        "on-secondary-fixed-variant": "#004f56",
+                        "on-tertiary": "#ffffff",
+                        "on-primary-fixed-variant": "#004880",
+                        "primary-fixed": "#d3e4ff",
+                        "on-error": "#ffffff",
+                        "on-secondary-container": "#006d77",
+                        "status-normal": "#1E8E5A",
+                        "on-tertiary-fixed": "#301400",
+                        "surface-container": "#e5effd",
+                        "inverse-primary": "#a1c9ff",
+                        "status-warning": "#B7791F",
+                        "surface-container-low": "#edf4ff",
+                        "on-secondary-fixed": "#001f23",
+                        "on-surface": "#121c27",
+                        "on-primary-fixed": "#001c38",
+                        "border-subtle": "#C6D2DE",
+                        "background": "#f7f9ff",
+                        "tertiary": "#733900",
+                        "surface": "#f7f9ff",
+                        "primary": "#004a83",
+                        "surface-container-high": "#dfe9f7",
+                        "tertiary-fixed": "#ffdcc5",
+                        "tertiary-container": "#964c00",
+                        "secondary-fixed": "#98f0fb",
+                        "on-secondary": "#ffffff",
+                        "secondary-container": "#96eef9",
+                        "on-primary-container": "#c6ddff",
+                        "card-white": "#FFFFFF",
+                        "surface-tint": "#0a60a6",
+                        "secondary-fixed-dim": "#7cd4df",
+                        "secondary": "#006972",
+                        "outline": "#717782",
+                        "canvas": "#F7F9FB"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "container-max": "1440px",
+                        "table-cell-h": "16px",
+                        "card-padding": "24px",
+                        "table-cell-v": "12px",
+                        "gutter": "24px",
+                        "base": "4px"
+                    },
+                    "fontFamily": {
+                        "title-sm": ["IBM Plex Sans"],
+                        "label-caps": ["IBM Plex Sans"],
+                        "body-reading": ["IBM Plex Sans"],
+                        "metric-display": ["IBM Plex Sans"],
+                        "headline-md": ["IBM Plex Sans"],
+                        "headline-lg": ["IBM Plex Sans"],
+                        "body-dense": ["IBM Plex Sans"]
+                    },
+                    "fontSize": {
+                        "title-sm": ["18px", { "lineHeight": "1.4", "fontWeight": "600" }],
+                        "label-caps": ["12px", { "lineHeight": "1.0", "letterSpacing": "0.06em", "fontWeight": "600" }],
+                        "body-reading": ["16px", { "lineHeight": "1.65", "fontWeight": "400" }],
+                        "metric-display": ["34px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+                        "headline-md": ["24px", { "lineHeight": "1.3", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "headline-lg": ["32px", { "lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                        "body-dense": ["14px", { "lineHeight": "1.55", "fontWeight": "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { background-color: theme('colors.canvas'); }
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+        .card-shadow { box-shadow: 0 4px 20px -2px rgba(16, 26, 36, 0.06); }
+    </style>
+</head>
+<body class="text-on-surface font-body-reading antialiased flex">
+<!-- SideNavBar -->
+<nav class="bg-surface dark:bg-on-background fixed left-0 top-0 h-full w-[240px] border-r border-border-subtle dark:border-outline flex flex-col py-6 px-4 z-50">
+<div class="mb-8 px-2 flex items-center gap-3">
+<span class="material-symbols-outlined text-3xl text-primary" data-weight="fill">water_drop</span>
+<div>
+<h1 class="font-headline-md text-headline-md font-bold text-primary dark:text-primary-fixed">PWA Analytics</h1>
+<p class="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-widest mt-1">Big Data Platform</p>
+</div>
+</div>
+<div class="flex flex-col gap-2 flex-grow">
+<!-- Overview -->
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed hover:bg-surface-container-low dark:hover:bg-surface-variant transition-colors duration-200 ease-in-out font-title-sm text-title-sm" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+                Overview
+            </a>
+<!-- Regional -->
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed hover:bg-surface-container-low dark:hover:bg-surface-variant transition-colors duration-200 ease-in-out font-title-sm text-title-sm" href="#">
+<span class="material-symbols-outlined">map</span>
+                Regional
+            </a>
+<!-- Branch -->
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed hover:bg-surface-container-low dark:hover:bg-surface-variant transition-colors duration-200 ease-in-out font-title-sm text-title-sm" href="#">
+<span class="material-symbols-outlined">hub</span>
+                Branch
+            </a>
+<!-- Data Quality (Active) -->
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-primary dark:text-primary-fixed font-bold border-r-4 border-primary dark:border-primary-fixed bg-surface-container dark:bg-surface-variant duration-200 ease-in-out font-title-sm text-title-sm" href="#">
+<span class="material-symbols-outlined">check_circle</span>
+                Data Quality
+            </a>
+<!-- KPI Settings -->
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed hover:bg-surface-container-low dark:hover:bg-surface-variant transition-colors duration-200 ease-in-out font-title-sm text-title-sm" href="#">
+<span class="material-symbols-outlined">settings</span>
+                KPI Settings
+            </a>
+</div>
+</nav>
+<!-- Main Wrapper -->
+<div class="flex-1 ml-[240px] flex flex-col min-h-screen">
+<!-- TopNavBar -->
+<header class="bg-canvas dark:bg-background sticky top-0 z-40 w-full border-b border-border-subtle dark:border-outline flex justify-between items-center h-16 px-8 transition-all duration-200">
+<div class="font-headline-md text-headline-md font-bold text-primary dark:text-primary-fixed">
+                คุณภาพข้อมูลและ Data Pipeline · Data Pipeline &amp; Quality
+            </div>
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-4 text-body-dense font-body-dense text-on-surface-variant">
+<div class="flex items-center gap-2 bg-surface-container-low px-3 py-1.5 rounded-full border border-border-subtle">
+<span class="w-2 h-2 rounded-full bg-status-normal"></span>
+<span class="material-symbols-outlined text-[18px]">wifi</span>
+<span>MQTT Broker: เชื่อมต่อแล้ว</span>
+</div>
+<span>อัปเดต 1 วินาทีที่แล้ว</span>
+</div>
+<div class="flex items-center gap-4 text-on-surface-variant">
+<button class="hover:text-primary transition-colors">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="hover:text-primary transition-colors">
+<span class="material-symbols-outlined">account_circle</span>
+</button>
+</div>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="p-gutter max-w-container-max mx-auto w-full flex-1 flex flex-col gap-gutter">
+<!-- Section A: 4 KPI Tiles -->
+<section class="grid grid-cols-12 gap-gutter">
+<!-- KPI 1 -->
+<div class="col-span-3 bg-card-white border border-border-subtle rounded-xl p-card-padding card-shadow flex flex-col justify-between">
+<h3 class="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-widest mb-4">ข้อความรับเข้า/วินาที · THROUGHPUT</h3>
+<div class="flex items-end justify-between">
+<div class="font-metric-display text-metric-display tabular-nums text-on-surface">1,240 <span class="text-title-sm text-on-surface-variant">msg/s</span></div>
+<div class="flex items-center text-status-normal font-title-sm text-title-sm">
+<span class="material-symbols-outlined text-[20px]">arrow_upward</span>
+</div>
+</div>
+</div>
+<!-- KPI 2 -->
+<div class="col-span-3 bg-card-white border border-border-subtle rounded-xl p-card-padding card-shadow flex flex-col justify-between">
+<h3 class="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-widest mb-4">เวลาตอบสนองเฉลี่ย · RESPONSE TIME</h3>
+<div>
+<div class="font-metric-display text-metric-display tabular-nums text-on-surface mb-1">182 <span class="text-title-sm text-on-surface-variant">ms</span></div>
+<div class="text-status-normal font-body-dense text-body-dense">เกณฑ์ ≤ 500 ms ✓</div>
+</div>
+</div>
+<!-- KPI 3 -->
+<div class="col-span-3 bg-card-white border border-border-subtle rounded-xl p-card-padding card-shadow flex flex-col justify-between">
+<h3 class="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-widest mb-4">แถวข้อมูลที่ใช้ได้ · VALID ROWS</h3>
+<div class="font-metric-display text-metric-display tabular-nums text-on-surface">9,126</div>
+</div>
+<!-- KPI 4 -->
+<div class="col-span-3 bg-card-white border border-border-subtle rounded-xl p-card-padding card-shadow flex flex-col justify-between">
+<h3 class="font-label-caps text-label-caps text-status-warning uppercase tracking-widest mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">warning</span>
+                        แถวที่กักกัน · QUARANTINED (DLQ)
+                    </h3>
+<div class="font-metric-display text-metric-display tabular-nums text-status-warning">235</div>
+</div>
+</section>
+<!-- Section B: Charts & Network -->
+<section class="grid grid-cols-12 gap-gutter">
+<!-- Ingest Rate Chart (7 cols) -->
+<div class="col-span-7 bg-card-white border border-border-subtle rounded-xl p-card-padding card-shadow">
+<h3 class="font-title-sm text-title-sm text-on-surface mb-6 border-b border-border-subtle pb-4">อัตราการรับเข้าข้อมูล · Ingest Rate (เรียลไทม์)</h3>
+<div class="h-48 relative mb-6">
+<!-- Chart Grid lines -->
+<div class="absolute inset-0 flex flex-col justify-between border-l border-b border-border-subtle">
+<div class="w-full border-t border-border-subtle/30 border-dashed h-0"></div>
+<div class="w-full border-t border-border-subtle/30 border-dashed h-0"></div>
+<div class="w-full border-t border-border-subtle/30 border-dashed h-0"></div>
+<div class="w-full border-t border-border-subtle/30 border-dashed h-0"></div>
+</div>
+<!-- Simulated SVG Line -->
+<svg class="absolute inset-0 h-full w-full" preserveaspectratio="none" viewbox="0 0 100 100">
+<path d="M0,80 L10,75 L20,85 L30,60 L40,65 L50,40 L60,55 L70,30 L80,45 L90,20 L100,25" fill="none" stroke="#0f62a8" stroke-width="1.5" vector-effect="non-scaling-stroke"></path>
+<!-- Gradient fill under line -->
+<path d="M0,80 L10,75 L20,85 L30,60 L40,65 L50,40 L60,55 L70,30 L80,45 L90,20 L100,25 L100,100 L0,100 Z" fill="url(#blue-gradient)" opacity="0.1"></path>
+<defs>
+<lineargradient id="blue-gradient" x1="0%" x2="0%" y1="0%" y2="100%">
+<stop offset="0%" stop-color="#0f62a8"></stop>
+<stop offset="100%" stop-color="#ffffff"></stop>
+</lineargradient>
+</defs>
+</svg>
+</div>
+<!-- Connection Timeline -->
+<div class="flex flex-col gap-1">
+<div class="flex h-2 rounded-full overflow-hidden w-full bg-surface-variant">
+<div class="bg-status-normal h-full w-[80%]"></div>
+<div class="bg-status-critical h-full w-[5%]"></div>
+<div class="bg-status-normal h-full w-[15%]"></div>
+</div>
+<div class="flex justify-between font-label-caps text-label-caps text-on-surface-variant mt-1">
+<span>สถานะการเชื่อมต่อ 60s</span>
+<div class="flex items-center gap-1 text-status-critical">
+<span class="material-symbols-outlined text-[14px]">warning</span>
+                                การเชื่อมต่อหลุด (เชื่อมต่อใหม่ใน 12 วินาที · Reconnected in 12s)
+                            </div>
+</div>
+</div>
+</div>
+<!-- Response Time DevTools Style (5 cols) -->
+<div class="col-span-5 bg-card-white border border-border-subtle rounded-xl p-card-padding card-shadow flex flex-col">
+<h3 class="font-title-sm text-title-sm text-on-surface mb-6 border-b border-border-subtle pb-4">Response Time (Network)</h3>
+<div class="flex-1 font-mono text-[13px] leading-relaxed">
+<table class="w-full text-left">
+<thead class="text-on-surface-variant border-b border-border-subtle font-normal">
+<tr>
+<th class="py-2 font-normal">Name</th>
+<th class="py-2 font-normal">Status</th>
+<th class="py-2 font-normal text-right tabular-nums">Time</th>
+</tr>
+</thead>
+<tbody class="text-on-surface">
+<tr class="border-b border-border-subtle/30">
+<td class="py-2.5 truncate max-w-[150px]" title="GET /api/telemetry/P-2">GET /api/telemetry/P-2</td>
+<td class="py-2.5 text-status-normal">200</td>
+<td class="py-2.5 text-right tabular-nums">176 ms</td>
+</tr>
+<tr class="border-b border-border-subtle/30">
+<td class="py-2.5 truncate max-w-[150px]" title="GET /api/telemetry/P-1">GET /api/telemetry/P-1</td>
+<td class="py-2.5 text-status-normal">200</td>
+<td class="py-2.5 text-right tabular-nums">189 ms</td>
+</tr>
+<tr class="border-b border-border-subtle/30">
+<td class="py-2.5 truncate max-w-[150px]" title="GET /api/dlq">GET /api/dlq</td>
+<td class="py-2.5 text-status-normal">200</td>
+<td class="py-2.5 text-right tabular-nums">121 ms</td>
+</tr>
+<tr>
+<td class="py-2.5 truncate max-w-[150px]" title="GET /api/pipeline/status">GET /api/pipeline/status</td>
+<td class="py-2.5 text-status-normal">200</td>
+<td class="py-2.5 text-right tabular-nums">94 ms</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="mt-4 pt-4 border-t border-border-subtle text-right font-body-dense text-body-dense text-on-surface-variant flex justify-between items-center">
+<span>ค่าเฉลี่ย 145 ms</span>
+<span class="text-status-normal">เกณฑ์ ≤ 500 ms</span>
+</div>
+</div>
+</section>
+<!-- Section C: DLQ Table -->
+<section class="col-span-12 bg-card-white border border-border-subtle rounded-xl p-0 card-shadow overflow-hidden">
+<div class="p-card-padding pb-4 border-b border-border-subtle flex justify-between items-end">
+<div>
+<h3 class="font-title-sm text-title-sm text-on-surface mb-1">Dead Letter Queue · ข้อมูลที่ไม่ผ่านการตรวจสอบ</h3>
+<p class="font-body-dense text-body-dense text-status-normal">กระบวนการหลักดำเนินต่อได้โดยไม่หยุดชะงัก · Main pipeline continues uninterrupted</p>
+</div>
+<button class="bg-primary text-on-primary font-body-dense text-body-dense px-4 py-2 rounded-lg hover:bg-primary-container transition-colors">Export DLQ</button>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead class="bg-canvas text-on-surface-variant font-label-caps text-label-caps border-b border-border-subtle sticky top-0">
+<tr>
+<th class="px-6 py-4 font-semibold uppercase tracking-wider whitespace-nowrap">เวลา (Time)</th>
+<th class="px-6 py-4 font-semibold uppercase tracking-wider whitespace-nowrap">Asset ID</th>
+<th class="px-6 py-4 font-semibold uppercase tracking-wider">สาเหตุที่ปฏิเสธ (Reason)</th>
+<th class="px-6 py-4 font-semibold uppercase tracking-wider whitespace-nowrap">การจัดการ (Action)</th>
+</tr>
+</thead>
+<tbody class="font-body-dense text-body-dense">
+<tr class="border-b border-border-subtle hover:bg-surface-container-low transition-colors">
+<td class="px-6 py-4 tabular-nums text-on-surface-variant">10:42:03</td>
+<td class="px-6 py-4 font-mono text-[13px]">DEV-UNKNOWN-88</td>
+<td class="px-6 py-4 text-status-warning">Asset ID ไม่พบในทะเบียนอุปกรณ์</td>
+<td class="px-6 py-4">ส่งเข้า DLQ อัตโนมัติ</td>
+</tr>
+<tr class="border-b border-border-subtle hover:bg-surface-container-low transition-colors bg-surface-bright">
+<td class="px-6 py-4 tabular-nums text-on-surface-variant">10:41:47</td>
+<td class="px-6 py-4 font-mono text-[13px] text-on-surface-variant/50">(null)</td>
+<td class="px-6 py-4 text-status-critical">แถวผลรวมประเทศไม่มี region/branch/เดือน (124,652,359 ลบ.ม.)</td>
+<td class="px-6 py-4">กักกัน</td>
+</tr>
+<tr class="border-b border-border-subtle hover:bg-surface-container-low transition-colors">
+<td class="px-6 py-4 tabular-nums text-on-surface-variant">10:40:22</td>
+<td class="px-6 py-4 font-mono text-[13px]">DUP-2023-01</td>
+<td class="px-6 py-4 text-status-critical">เดือน 2023-01 ซ้ำ 234 แถว byte-identical</td>
+<td class="px-6 py-4">ตัดออก</td>
+</tr>
+<tr class="hover:bg-surface-container-low transition-colors bg-surface-bright">
+<td class="px-6 py-4 tabular-nums text-on-surface-variant">10:39:05</td>
+<td class="px-6 py-4 font-mono text-[13px]">SENS-TEMP-3</td>
+<td class="px-6 py-4 text-status-warning">ค่าที่อ่านไม่ใช่ตัวเลข</td>
+<td class="px-6 py-4">ส่งเข้า DLQ</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<!-- Section D: Data Lineage -->
+<section class="col-span-12 bg-card-white border border-border-subtle rounded-xl p-card-padding card-shadow mb-8">
+<h3 class="font-title-sm text-title-sm text-on-surface mb-8 border-b border-border-subtle pb-4">Data Lineage · เส้นทางข้อมูล</h3>
+<div class="flex items-center justify-center py-4 px-8 overflow-x-auto">
+<!-- Flow Container -->
+<div class="flex items-start justify-between w-full max-w-4xl min-w-[700px] relative">
+<!-- Line connecting horizontal nodes -->
+<div class="absolute top-[32px] left-[10%] right-[10%] h-0.5 bg-border-subtle z-0"></div>
+<!-- Node 1: MQTT -->
+<div class="flex flex-col items-center gap-3 relative z-10 w-32">
+<div class="w-16 h-16 rounded-full bg-surface border-2 border-primary-container flex items-center justify-center text-primary-container shadow-sm">
+<span class="material-symbols-outlined text-[28px]">wifi</span>
+</div>
+<span class="font-body-dense text-body-dense text-center font-semibold">MQTT Broker</span>
+</div>
+<!-- Arrow -->
+<div class="relative z-10 mt-6 text-border-subtle">
+<span class="material-symbols-outlined">chevron_right</span>
+</div>
+<!-- Node 2: Validate (with branch) -->
+<div class="flex flex-col items-center relative z-10 w-32">
+<div class="flex flex-col items-center gap-3">
+<div class="w-16 h-16 rounded-full bg-surface border-2 border-status-normal flex items-center justify-center text-status-normal shadow-sm">
+<span class="material-symbols-outlined text-[28px]">check_circle</span>
+</div>
+<span class="font-body-dense text-body-dense text-center font-semibold">Validate</span>
+</div>
+<!-- Branch Line Down -->
+<div class="h-12 w-0.5 bg-border-subtle my-1 border-dashed"></div>
+<!-- DLQ Node -->
+<div class="flex flex-col items-center gap-2">
+<div class="w-12 h-12 rounded-lg bg-surface border-2 border-status-warning flex items-center justify-center text-status-warning shadow-sm">
+<span class="material-symbols-outlined text-[20px]">warning</span>
+</div>
+<span class="font-label-caps text-label-caps text-status-warning">DLQ</span>
+</div>
+</div>
+<!-- Arrow -->
+<div class="relative z-10 mt-6 text-border-subtle">
+<span class="material-symbols-outlined">chevron_right</span>
+</div>
+<!-- Node 3: TimescaleDB -->
+<div class="flex flex-col items-center gap-3 relative z-10 w-32">
+<div class="w-16 h-16 rounded-lg bg-surface border-2 border-primary flex items-center justify-center text-primary shadow-sm">
+<span class="material-symbols-outlined text-[28px]">database</span>
+</div>
+<div class="text-center">
+<span class="font-body-dense text-body-dense font-semibold block">TimescaleDB</span>
+<span class="font-label-caps text-label-caps text-on-surface-variant">ฐานข้อมูล Time-Series</span>
+</div>
+</div>
+<!-- Arrow -->
+<div class="relative z-10 mt-6 text-border-subtle">
+<span class="material-symbols-outlined">chevron_right</span>
+</div>
+<!-- Node 4: API / Dashboard -->
+<div class="flex flex-col items-center gap-3 relative z-10 w-32">
+<div class="w-16 h-16 rounded-lg bg-surface border-2 border-primary-fixed-dim flex items-center justify-center text-primary-fixed-dim shadow-sm">
+<span class="material-symbols-outlined text-[28px]">monitoring</span>
+</div>
+<span class="font-body-dense text-body-dense text-center font-semibold">API / Dashboard</span>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- Footer -->
+<footer class="bg-surface-container-lowest dark:bg-on-background border-t border-border-subtle dark:border-outline p-4 flex flex-row justify-between items-center px-8 mt-auto w-full transition-opacity duration-150">
+<div class="font-label-caps text-label-caps uppercase tracking-widest text-on-surface-variant dark:text-outline-variant">
+                © Provincial Waterworks Authority Data Trust Protocol
+            </div>
+<div class="flex gap-6 font-body-dense text-body-dense">
+<a class="text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed" href="#">Data Security Policy</a>
+<a class="text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed" href="#">System Status</a>
+<a class="text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed" href="#">Contact Support</a>
+</div>
+</footer>
+</div>
+</body></html>

@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+
+<html class="light" lang="th"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AI Predictive Maintenance - PWA Analytics</title>
+<!-- Google Fonts: IBM Plex Sans (Thai compatible) -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "on-surface": "#121c27",
+                      "surface-tint": "#0a60a6",
+                      "simulated-violet": "#7C3AED",
+                      "status-normal": "#1E8E5A",
+                      "on-primary": "#ffffff",
+                      "on-error-container": "#93000a",
+                      "surface-bright": "#f7f9ff",
+                      "on-error": "#ffffff",
+                      "secondary-fixed": "#98f0fb",
+                      "on-surface-variant": "#414751",
+                      "secondary-fixed-dim": "#7cd4df",
+                      "on-tertiary-fixed": "#301400",
+                      "canvas": "#F7F9FB",
+                      "on-tertiary": "#ffffff",
+                      "tertiary-fixed-dim": "#ffb783",
+                      "tertiary-fixed": "#ffdcc5",
+                      "on-primary-fixed-variant": "#004880",
+                      "error-container": "#ffdad6",
+                      "inverse-primary": "#a1c9ff",
+                      "status-critical": "#B42318",
+                      "on-secondary-fixed-variant": "#004f56",
+                      "surface-variant": "#d9e3f2",
+                      "surface": "#f7f9ff",
+                      "surface-container-low": "#edf4ff",
+                      "secondary": "#006972",
+                      "card-white": "#FFFFFF",
+                      "on-secondary-fixed": "#001f23",
+                      "on-tertiary-container": "#ffd2b4",
+                      "inverse-surface": "#27313c",
+                      "outline": "#717782",
+                      "status-warning": "#B7791F",
+                      "primary-container": "#0f62a8",
+                      "primary-fixed": "#d3e4ff",
+                      "primary": "#004a83",
+                      "error": "#ba1a1a",
+                      "tertiary-container": "#964c00",
+                      "tertiary": "#733900",
+                      "surface-container-lowest": "#ffffff",
+                      "on-secondary-container": "#006d77",
+                      "secondary-container": "#96eef9",
+                      "on-background": "#121c27",
+                      "surface-dim": "#d1dbe9",
+                      "background": "#f7f9ff",
+                      "on-primary-fixed": "#001c38",
+                      "surface-container": "#e5effd",
+                      "surface-container-highest": "#d9e3f2",
+                      "inverse-on-surface": "#e8f1ff",
+                      "on-tertiary-fixed-variant": "#703700",
+                      "border-subtle": "#C6D2DE",
+                      "on-primary-container": "#c6ddff",
+                      "on-secondary": "#ffffff",
+                      "status-nodata": "#8A97A3",
+                      "primary-fixed-dim": "#a1c9ff",
+                      "surface-container-high": "#dfe9f7",
+                      "outline-variant": "#c1c7d2"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "card-padding": "24px",
+                      "gutter": "24px",
+                      "container-max": "1440px",
+                      "base": "4px",
+                      "table-cell-h": "16px",
+                      "table-cell-v": "12px"
+              },
+              "fontFamily": {
+                      "title-sm": ["IBM Plex Sans Thai", "IBM Plex Sans", "sans-serif"],
+                      "body-dense": ["IBM Plex Sans Thai", "IBM Plex Sans", "sans-serif"],
+                      "label-caps": ["IBM Plex Sans Thai", "IBM Plex Sans", "sans-serif"],
+                      "metric-display": ["IBM Plex Sans", "sans-serif"],
+                      "headline-lg": ["IBM Plex Sans Thai", "IBM Plex Sans", "sans-serif"],
+                      "body-reading": ["IBM Plex Sans Thai", "IBM Plex Sans", "sans-serif"],
+                      "headline-md": ["IBM Plex Sans Thai", "IBM Plex Sans", "sans-serif"]
+              },
+              "fontSize": {
+                      "title-sm": ["18px", { "lineHeight": "1.4", "fontWeight": "600" }],
+                      "body-dense": ["14px", { "lineHeight": "1.55", "fontWeight": "400" }],
+                      "label-caps": ["12px", { "lineHeight": "1.0", "letterSpacing": "0.06em", "fontWeight": "600" }],
+                      "metric-display": ["34px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+                      "headline-lg": ["32px", { "lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                      "body-reading": ["16px", { "lineHeight": "1.65", "fontWeight": "400" }],
+                      "headline-md": ["24px", { "lineHeight": "1.3", "letterSpacing": "-0.01em", "fontWeight": "600" }]
+              },
+              "boxShadow": {
+                  "soft": "0 4px 20px -2px rgba(16, 26, 36, 0.06)"
+              }
+            }
+          }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        /* Tabular nums for data tables */
+        .tabular-nums { font-variant-numeric: tabular-nums; }
+    </style>
+</head>
+<body class="bg-canvas text-on-surface font-body-reading min-h-screen flex">
+<!-- SideNavBar (Shared Component) -->
+<nav class="fixed left-0 top-0 h-full w-[240px] bg-surface flex flex-col py-6 px-4 border-r border-border-subtle z-50">
+<div class="mb-8 px-4 flex items-center gap-3">
+<div class="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-on-primary">
+<span class="material-symbols-outlined">water_drop</span>
+</div>
+<div>
+<h1 class="font-headline-md text-headline-md font-bold text-primary">PWA Analytics</h1>
+<p class="font-label-caps text-label-caps text-outline">Big Data Platform</p>
+</div>
+</div>
+<div class="flex flex-col gap-2 flex-1">
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-primary font-bold border-r-4 border-primary bg-surface-container" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span>Overview</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant hover:text-primary hover:bg-surface-container-low transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">map</span>
+<span>Regional</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant hover:text-primary hover:bg-surface-container-low transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">hub</span>
+<span>Branch</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant hover:text-primary hover:bg-surface-container-low transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">check_circle</span>
+<span>Data Quality</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant hover:text-primary hover:bg-surface-container-low transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span>KPI Settings</span>
+</a>
+</div>
+</nav>
+<!-- Main Content Wrapper -->
+<div class="ml-[240px] flex-1 flex flex-col min-h-screen">
+<!-- Top Bar -->
+<header class="sticky top-0 z-40 bg-canvas/90 backdrop-blur-sm border-b border-border-subtle h-16 px-8 flex justify-between items-center">
+<div class="flex items-center gap-6">
+<h2 class="font-headline-md text-headline-md text-primary font-bold">บำรุงรักษาเชิงพยากรณ์ด้วย AI · AI Predictive Maintenance</h2>
+<div class="flex items-center gap-2 bg-secondary/10 border border-secondary/20 px-3 py-1 rounded-full text-secondary font-body-dense text-body-dense font-medium">
+<span class="material-symbols-outlined text-[18px]">memory</span>
+                    โมเดล: RandomForest v1.3
+                </div>
+</div>
+<div class="flex items-center gap-4">
+<span class="text-outline font-body-dense text-body-dense">ประเมินล่าสุด 30 วินาทีที่แล้ว</span>
+</div>
+</header>
+<!-- Main Canvas -->
+<main class="p-gutter max-w-container-max mx-auto w-full flex-1 flex flex-col gap-gutter">
+<!-- Section A: KPI Tiles -->
+<section class="grid grid-cols-12 gap-gutter">
+<!-- Tile 1 -->
+<div class="col-span-3 bg-card-white border border-border-subtle rounded-xl p-card-padding shadow-soft relative flex flex-col justify-between">
+<div class="absolute top-4 right-4 bg-simulated-violet text-on-primary font-label-caps text-label-caps px-2 py-0.5 rounded uppercase tracking-wider">Simulated</div>
+<h3 class="font-label-caps text-label-caps text-outline uppercase mb-2">อุปกรณ์เฝ้าระวัง · AT-RISK DEVICES</h3>
+<div class="flex items-end gap-3 mt-4">
+<span class="font-metric-display text-metric-display text-on-surface">4</span>
+<span class="font-body-dense text-body-dense text-outline mb-1">เครื่อง</span>
+</div>
+<div class="mt-4 flex items-center gap-2 text-status-warning font-body-dense text-body-dense">
+<span class="material-symbols-outlined text-[20px]">warning</span>
+<span>ต้องการตรวจสอบ</span>
+</div>
+</div>
+<!-- Tile 2 -->
+<div class="col-span-3 bg-card-white border border-border-subtle rounded-xl p-card-padding shadow-soft relative flex flex-col justify-between">
+<div class="absolute top-4 right-4 bg-simulated-violet text-on-primary font-label-caps text-label-caps px-2 py-0.5 rounded uppercase tracking-wider">Simulated</div>
+<h3 class="font-label-caps text-label-caps text-outline uppercase mb-2">Health Score เฉลี่ย · AVG HEALTH</h3>
+<div class="flex items-end gap-3 mt-4">
+<span class="font-metric-display text-metric-display text-status-normal">82.4</span>
+<span class="font-body-dense text-body-dense text-outline mb-1">/ 100</span>
+</div>
+<div class="mt-4 flex items-center gap-2 text-status-normal font-body-dense text-body-dense">
+<span class="material-symbols-outlined text-[20px]">trending_up</span>
+<span>ภาพรวมปกติ</span>
+</div>
+</div>
+<!-- Tile 3 -->
+<div class="col-span-3 bg-card-white border border-border-subtle rounded-xl p-card-padding shadow-soft relative flex flex-col justify-between">
+<div class="absolute top-4 right-4 bg-simulated-violet text-on-primary font-label-caps text-label-caps px-2 py-0.5 rounded uppercase tracking-wider">Simulated</div>
+<h3 class="font-label-caps text-label-caps text-outline uppercase mb-2">คาดการณ์เสียใน 7 วัน · PTTF &lt; 7d</h3>
+<div class="flex items-end gap-3 mt-4">
+<span class="font-metric-display text-metric-display text-status-critical">2</span>
+<span class="font-body-dense text-body-dense text-outline mb-1">เครื่อง</span>
+</div>
+<div class="mt-4 flex items-center gap-2 text-status-critical font-body-dense text-body-dense">
+<span class="material-symbols-outlined text-[20px]">error</span>
+<span>ความเสี่ยงสูง</span>
+</div>
+</div>
+<!-- Tile 4 -->
+<div class="col-span-3 bg-card-white border border-border-subtle rounded-xl p-card-padding shadow-soft relative flex flex-col justify-between">
+<div class="absolute top-4 right-4 bg-simulated-violet text-on-primary font-label-caps text-label-caps px-2 py-0.5 rounded uppercase tracking-wider">Simulated</div>
+<h3 class="font-label-caps text-label-caps text-outline uppercase mb-2">ความแม่นยำโมเดล · MODEL ACCURACY</h3>
+<div class="flex items-end gap-3 mt-4">
+<span class="font-metric-display text-metric-display text-on-surface">4.8</span>
+<span class="font-body-dense text-body-dense text-outline mb-1">RMSE</span>
+</div>
+<div class="mt-4 flex items-center gap-2 text-outline font-body-dense text-body-dense">
+<span class="material-symbols-outlined text-[20px]">analytics</span>
+<span>ทดสอบกับข้อมูลจริง</span>
+</div>
+</div>
+</section>
+<!-- Section B: Model Info & Table -->
+<section class="grid grid-cols-12 gap-gutter">
+<!-- Left: Model Info -->
+<div class="col-span-5 bg-card-white border border-border-subtle rounded-xl p-card-padding shadow-soft relative flex flex-col">
+<div class="absolute top-4 right-4 bg-simulated-violet text-on-primary font-label-caps text-label-caps px-2 py-0.5 rounded uppercase tracking-wider">Simulated</div>
+<div class="flex items-center gap-3 border-b border-border-subtle pb-4 mb-4">
+<span class="material-symbols-outlined text-primary text-[28px]">account_tree</span>
+<h3 class="font-title-sm text-title-sm text-on-surface">แบบจำลองที่ผ่านการฝึกสอน · Trained Model</h3>
+</div>
+<div class="flex-1 font-body-dense text-body-dense text-on-surface-variant space-y-3" style="font-family: monospace, 'IBM Plex Sans Thai';">
+<div class="grid grid-cols-3 gap-2 border-b border-canvas pb-2">
+<span class="text-outline">Algorithm:</span>
+<span class="col-span-2 text-on-surface font-medium">Random Forest Regressor</span>
+</div>
+<div class="grid grid-cols-3 gap-2 border-b border-canvas pb-2">
+<span class="text-outline">File:</span>
+<span class="col-span-2 text-on-surface">model.pkl (2.4 MB)</span>
+</div>
+<div class="grid grid-cols-3 gap-2 border-b border-canvas pb-2">
+<span class="text-outline">Parameters:</span>
+<span class="col-span-2 text-on-surface">n_estimators: 200, max_depth: 12</span>
+</div>
+<div class="grid grid-cols-3 gap-2 border-b border-canvas pb-2">
+<span class="text-outline">Features:</span>
+<span class="col-span-2 text-on-surface">14</span>
+</div>
+<div class="grid grid-cols-3 gap-2 border-b border-canvas pb-2">
+<span class="text-outline">Trained:</span>
+<span class="col-span-2 text-on-surface">27 ก.ค. 2569</span>
+</div>
+<div class="grid grid-cols-3 gap-2">
+<span class="text-outline">Metrics:</span>
+<span class="col-span-2 text-on-surface font-medium text-primary">RMSE: 4.8 · MAE: 3.1</span>
+</div>
+</div>
+<div class="mt-6 pt-4 border-t border-border-subtle">
+<div class="inline-flex items-center gap-2 bg-surface-container px-3 py-1.5 rounded text-on-surface-variant font-body-dense text-body-dense border border-border-subtle">
+<span class="material-symbols-outlined text-[16px]">folder_open</span>
+<span style="font-family: monospace;">artifacts/model.pkl</span>
+</div>
+</div>
+</div>
+<!-- Right: Data Table -->
+<div class="col-span-7 bg-card-white border border-border-subtle rounded-xl shadow-soft relative flex flex-col overflow-hidden">
+<div class="p-card-padding pb-4 border-b border-border-subtle flex justify-between items-center bg-card-white relative z-10">
+<h3 class="font-title-sm text-title-sm text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-primary">table_chart</span>
+                            Health Score &amp; PTTF รายอุปกรณ์
+                        </h3>
+<div class="bg-simulated-violet text-on-primary font-label-caps text-label-caps px-2 py-0.5 rounded uppercase tracking-wider">Simulated</div>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-canvas border-b border-border-subtle font-label-caps text-label-caps text-outline">
+<th class="px-table-cell-h py-table-cell-v font-medium">Rank</th>
+<th class="px-table-cell-h py-table-cell-v font-medium">Asset</th>
+<th class="px-table-cell-h py-table-cell-v font-medium">Branch</th>
+<th class="px-table-cell-h py-table-cell-v font-medium w-48">Health Score</th>
+<th class="px-table-cell-h py-table-cell-v font-medium text-right">PTTF (Days)</th>
+<th class="px-table-cell-h py-table-cell-v font-medium text-center">Trend</th>
+<th class="px-table-cell-h py-table-cell-v font-medium">Status</th>
+</tr>
+</thead>
+<tbody class="font-body-dense text-body-dense text-on-surface">
+<!-- Row 1 -->
+<tr class="border-b border-border-subtle hover:bg-surface-container-low transition-colors">
+<td class="px-table-cell-h py-table-cell-v tabular-nums text-outline">1</td>
+<td class="px-table-cell-h py-table-cell-v font-medium">ปั๊ม P-2</td>
+<td class="px-table-cell-h py-table-cell-v text-on-surface-variant">สมุทรสาคร</td>
+<td class="px-table-cell-h py-table-cell-v">
+<div class="flex items-center gap-3">
+<span class="tabular-nums w-6">38</span>
+<div class="flex-1 h-1.5 bg-canvas rounded-full overflow-hidden">
+<div class="h-full bg-status-critical" style="width: 38%"></div>
+</div>
+</div>
+</td>
+<td class="px-table-cell-h py-table-cell-v text-right tabular-nums text-status-critical font-bold">3.2</td>
+<td class="px-table-cell-h py-table-cell-v text-center"><span class="material-symbols-outlined text-status-critical text-[18px]">trending_down</span></td>
+<td class="px-table-cell-h py-table-cell-v">
+<div class="flex items-center gap-1.5 text-status-critical">
+<span class="material-symbols-outlined text-[16px] fill-current" style="font-variation-settings: 'FILL' 1;">error</span>
+<span>วิกฤต</span>
+</div>
+</td>
+</tr>
+<!-- Row 2 -->
+<tr class="border-b border-border-subtle hover:bg-surface-container-low transition-colors">
+<td class="px-table-cell-h py-table-cell-v tabular-nums text-outline">2</td>
+<td class="px-table-cell-h py-table-cell-v font-medium">ปั๊ม P-7</td>
+<td class="px-table-cell-h py-table-cell-v text-on-surface-variant">ชลบุรี</td>
+<td class="px-table-cell-h py-table-cell-v">
+<div class="flex items-center gap-3">
+<span class="tabular-nums w-6">54</span>
+<div class="flex-1 h-1.5 bg-canvas rounded-full overflow-hidden">
+<div class="h-full bg-status-warning" style="width: 54%"></div>
+</div>
+</div>
+</td>
+<td class="px-table-cell-h py-table-cell-v text-right tabular-nums text-status-warning font-bold">6.8</td>
+<td class="px-table-cell-h py-table-cell-v text-center"><span class="material-symbols-outlined text-status-warning text-[18px]">trending_down</span></td>
+<td class="px-table-cell-h py-table-cell-v">
+<div class="flex items-center gap-1.5 text-status-warning">
+<span class="material-symbols-outlined text-[16px] fill-current" style="font-variation-settings: 'FILL' 1;">warning</span>
+<span>เฝ้าระวัง</span>
+</div>
+</td>
+</tr>
+<!-- Row 3 -->
+<tr class="border-b border-border-subtle hover:bg-surface-container-low transition-colors">
+<td class="px-table-cell-h py-table-cell-v tabular-nums text-outline">3</td>
+<td class="px-table-cell-h py-table-cell-v font-medium">มอเตอร์ M-3</td>
+<td class="px-table-cell-h py-table-cell-v text-on-surface-variant">พัทยา</td>
+<td class="px-table-cell-h py-table-cell-v">
+<div class="flex items-center gap-3">
+<span class="tabular-nums w-6">61</span>
+<div class="flex-1 h-1.5 bg-canvas rounded-full overflow-hidden">
+<div class="h-full bg-status-warning" style="width: 61%"></div>
+</div>
+</div>
+</td>
+<td class="px-table-cell-h py-table-cell-v text-right tabular-nums text-on-surface">12.5</td>
+<td class="px-table-cell-h py-table-cell-v text-center"><span class="material-symbols-outlined text-outline text-[18px]">horizontal_rule</span></td>
+<td class="px-table-cell-h py-table-cell-v">
+<div class="flex items-center gap-1.5 text-status-warning">
+<span class="material-symbols-outlined text-[16px] fill-current" style="font-variation-settings: 'FILL' 1;">warning</span>
+<span>เฝ้าระวัง</span>
+</div>
+</td>
+</tr>
+<!-- Row 4 -->
+<tr class="border-b border-border-subtle hover:bg-surface-container-low transition-colors">
+<td class="px-table-cell-h py-table-cell-v tabular-nums text-outline">4</td>
+<td class="px-table-cell-h py-table-cell-v font-medium">ปั๊ม P-1</td>
+<td class="px-table-cell-h py-table-cell-v text-on-surface-variant">สมุทรสาคร</td>
+<td class="px-table-cell-h py-table-cell-v">
+<div class="flex items-center gap-3">
+<span class="tabular-nums w-6">79</span>
+<div class="flex-1 h-1.5 bg-canvas rounded-full overflow-hidden">
+<div class="h-full bg-primary-container" style="width: 79%"></div>
+</div>
+</div>
+</td>
+<td class="px-table-cell-h py-table-cell-v text-right tabular-nums text-on-surface">41.0</td>
+<td class="px-table-cell-h py-table-cell-v text-center"><span class="material-symbols-outlined text-outline text-[18px]">horizontal_rule</span></td>
+<td class="px-table-cell-h py-table-cell-v">
+<div class="flex items-center gap-1.5 text-status-normal">
+<span class="material-symbols-outlined text-[16px] fill-current" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+<span>ปกติ</span>
+</div>
+</td>
+</tr>
+<!-- Row 5 -->
+<tr class="hover:bg-surface-container-low transition-colors">
+<td class="px-table-cell-h py-table-cell-v tabular-nums text-outline">5</td>
+<td class="px-table-cell-h py-table-cell-v font-medium">วาล์ว V-9</td>
+<td class="px-table-cell-h py-table-cell-v text-on-surface-variant">รังสิต</td>
+<td class="px-table-cell-h py-table-cell-v">
+<div class="flex items-center gap-3">
+<span class="tabular-nums w-6">88</span>
+<div class="flex-1 h-1.5 bg-canvas rounded-full overflow-hidden">
+<div class="h-full bg-primary-container" style="width: 88%"></div>
+</div>
+</div>
+</td>
+<td class="px-table-cell-h py-table-cell-v text-right tabular-nums text-on-surface">63.0</td>
+<td class="px-table-cell-h py-table-cell-v text-center"><span class="material-symbols-outlined text-status-normal text-[18px]">trending_up</span></td>
+<td class="px-table-cell-h py-table-cell-v">
+<div class="flex items-center gap-1.5 text-status-normal">
+<span class="material-symbols-outlined text-[16px] fill-current" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+<span>ปกติ</span>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</section>
+<!-- Section C: Charts & Comparisons -->
+<section class="grid grid-cols-12 gap-gutter">
+<!-- Left: Root Cause Analysis -->
+<div class="col-span-7 bg-card-white border border-border-subtle rounded-xl p-card-padding shadow-soft relative flex flex-col">
+<div class="absolute top-4 right-4 bg-simulated-violet text-on-primary font-label-caps text-label-caps px-2 py-0.5 rounded uppercase tracking-wider">Simulated</div>
+<div class="flex items-center gap-3 mb-6">
+<span class="material-symbols-outlined text-primary text-[24px]">troubleshoot</span>
+<h3 class="font-title-sm text-title-sm text-on-surface">การวิเคราะห์สาเหตุ · Root Cause Analysis — ปั๊ม P-2</h3>
+</div>
+<div class="flex-1 flex flex-col gap-4 pr-12">
+<!-- Chart Bars -->
+<div class="grid grid-cols-[120px_1fr_40px] items-center gap-4">
+<span class="text-right font-body-dense text-body-dense text-on-surface-variant truncate">Vibration</span>
+<div class="h-3 bg-canvas rounded-r"><div class="h-full bg-primary rounded-r" style="width: 80%"></div></div>
+<span class="tabular-nums font-body-dense text-body-dense text-on-surface">0.34</span>
+</div>
+<div class="grid grid-cols-[120px_1fr_40px] items-center gap-4">
+<span class="text-right font-body-dense text-body-dense text-on-surface-variant truncate">Bearing Temp</span>
+<div class="h-3 bg-canvas rounded-r"><div class="h-full bg-primary/80 rounded-r" style="width: 65%"></div></div>
+<span class="tabular-nums font-body-dense text-body-dense text-on-surface">0.27</span>
+</div>
+<div class="grid grid-cols-[120px_1fr_40px] items-center gap-4">
+<span class="text-right font-body-dense text-body-dense text-on-surface-variant truncate">SEC</span>
+<div class="h-3 bg-canvas rounded-r"><div class="h-full bg-primary/60 rounded-r" style="width: 45%"></div></div>
+<span class="tabular-nums font-body-dense text-body-dense text-on-surface">0.19</span>
+</div>
+<div class="grid grid-cols-[120px_1fr_40px] items-center gap-4">
+<span class="text-right font-body-dense text-body-dense text-on-surface-variant truncate">Working Hours</span>
+<div class="h-3 bg-canvas rounded-r"><div class="h-full bg-primary/40 rounded-r" style="width: 25%"></div></div>
+<span class="tabular-nums font-body-dense text-body-dense text-on-surface">0.12</span>
+</div>
+<div class="grid grid-cols-[120px_1fr_40px] items-center gap-4">
+<span class="text-right font-body-dense text-body-dense text-on-surface-variant truncate">Pressure</span>
+<div class="h-3 bg-canvas rounded-r"><div class="h-full bg-primary/20 rounded-r" style="width: 15%"></div></div>
+<span class="tabular-nums font-body-dense text-body-dense text-on-surface">0.08</span>
+</div>
+</div>
+<!-- AI Summary Box -->
+<div class="mt-8 border-l-4 border-secondary bg-secondary/5 p-4 rounded-r">
+<div class="flex gap-3">
+<span class="material-symbols-outlined text-secondary">smart_toy</span>
+<div>
+<h4 class="font-label-caps text-label-caps text-secondary uppercase mb-1">AI Recommendation</h4>
+<p class="font-body-dense text-body-dense text-on-surface">สาเหตุหลัก: การสั่นสะเทือนสูงผิดปกติร่วมกับอุณหภูมิตลับลูกปืนที่เพิ่มขึ้น แนะนำให้เข้าตรวจสอบเชิงลึกทันที</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Right: Dataset Comparison -->
+<div class="col-span-5 bg-card-white border border-border-subtle rounded-xl p-card-padding shadow-soft relative flex flex-col justify-between">
+<div class="absolute top-4 right-4 bg-simulated-violet text-on-primary font-label-caps text-label-caps px-2 py-0.5 rounded uppercase tracking-wider">Simulated</div>
+<div class="flex items-center gap-3 mb-6">
+<span class="material-symbols-outlined text-primary text-[24px]">compare</span>
+<h3 class="font-title-sm text-title-sm text-on-surface">Health Score บนชุดข้อมูล 2 ชุด</h3>
+</div>
+<div class="flex-1 flex flex-col gap-6 justify-center">
+<!-- Dataset A -->
+<div class="border border-border-subtle rounded-lg p-4 bg-canvas flex items-center justify-between">
+<div>
+<h4 class="font-label-caps text-label-caps text-outline uppercase mb-1">Dataset A (Normal)</h4>
+<div class="flex items-baseline gap-4 mt-2">
+<div>
+<span class="text-[11px] text-outline block">HEALTH</span>
+<span class="font-metric-display text-[24px] text-status-normal">86</span>
+</div>
+<div>
+<span class="text-[11px] text-outline block">PTTF</span>
+<span class="font-metric-display text-[24px] text-on-surface">45<span class="text-sm font-normal">d</span></span>
+</div>
+</div>
+</div>
+<div class="w-16 h-16 rounded-full border-4 border-status-normal flex items-center justify-center bg-white shadow-sm">
+<span class="material-symbols-outlined text-status-normal">check</span>
+</div>
+</div>
+<!-- Dataset B -->
+<div class="border border-status-critical/30 rounded-lg p-4 bg-error-container/20 flex items-center justify-between">
+<div>
+<h4 class="font-label-caps text-label-caps text-outline uppercase mb-1">Dataset B (Degraded)</h4>
+<div class="flex items-baseline gap-4 mt-2">
+<div>
+<span class="text-[11px] text-outline block">HEALTH</span>
+<span class="font-metric-display text-[24px] text-status-critical">38</span>
+</div>
+<div>
+<span class="text-[11px] text-outline block">PTTF</span>
+<span class="font-metric-display text-[24px] text-status-critical">3.2<span class="text-sm font-normal">d</span></span>
+</div>
+</div>
+</div>
+<div class="w-16 h-16 rounded-full border-4 border-status-critical flex items-center justify-center bg-white shadow-sm">
+<span class="material-symbols-outlined text-status-critical">priority_high</span>
+</div>
+</div>
+</div>
+<p class="mt-6 font-body-dense text-body-dense text-outline text-center">โมเดลตอบสนองต่อชุดข้อมูลที่แตกต่างกัน</p>
+</div>
+</section>
+<!-- Section D: API Code Block -->
+<section class="col-span-12">
+<div class="bg-card-white border border-border-subtle rounded-xl p-card-padding shadow-soft">
+<div class="flex items-center gap-3 mb-4">
+<span class="material-symbols-outlined text-primary text-[24px]">api</span>
+<h3 class="font-title-sm text-title-sm text-on-surface">Feedback Loop API</h3>
+</div>
+<!-- Swagger Style Row -->
+<div class="border border-border-subtle rounded-lg overflow-hidden">
+<div class="bg-canvas border-b border-border-subtle p-3 flex items-center gap-4">
+<span class="bg-status-normal text-white px-3 py-1 rounded font-bold text-[13px] tracking-wide">POST</span>
+<span class="font-mono text-sm text-on-surface font-semibold">/api/feedback</span>
+<span class="font-body-dense text-body-dense text-outline ml-4">ยืนยัน/แก้ไขผลการพยากรณ์</span>
+</div>
+<!-- Code Block -->
+<div class="bg-inverse-surface p-4 text-inverse-on-surface font-mono text-sm leading-relaxed overflow-x-auto">
+<pre class="m-0"><code>{
+  <span class="text-secondary-fixed">"asset_id"</span>: <span class="text-tertiary-fixed">"P-2"</span>,
+  <span class="text-secondary-fixed">"model_version"</span>: <span class="text-tertiary-fixed">"1.3"</span>,
+  <span class="text-secondary-fixed">"feedback"</span>: {
+    <span class="text-secondary-fixed">"was_correct"</span>: <span class="text-status-normal">true</span>,
+    <span class="text-secondary-fixed">"actual_pttf_days"</span>: <span class="text-tertiary-fixed">4.0</span>,
+    <span class="text-secondary-fixed">"notes"</span>: <span class="text-tertiary-fixed">"Checked bearing, replacement scheduled."</span>
+  }
+}</code></pre>
+</div>
+</div>
+<p class="mt-3 font-body-dense text-body-dense text-outline flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">info</span>
+                        ทดสอบผ่าน Swagger UI ได้จริง
+                    </p>
+</div>
+</section>
+</main>
+<!-- Footer (Shared Component) -->
+<footer class="bg-surface-container-lowest border-t border-border-subtle p-4 px-8 flex flex-row justify-between items-center mt-auto">
+<div class="font-body-dense text-body-dense text-on-surface-variant">
+                © Provincial Waterworks Authority Data Trust Protocol
+            </div>
+<div class="flex gap-6 font-body-dense text-body-dense">
+<a class="text-on-surface-variant hover:text-primary transition-opacity duration-150 underline" href="#">Data Security Policy</a>
+<a class="text-on-surface-variant hover:text-primary transition-opacity duration-150" href="#">System Status</a>
+<a class="text-on-surface-variant hover:text-primary transition-opacity duration-150" href="#">Contact Support</a>
+</div>
+</footer>
+</div>
+</body></html>

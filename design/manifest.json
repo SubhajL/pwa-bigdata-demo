@@ -1,0 +1,113 @@
+{
+  "projectId": "16433260128763898652",
+  "title": "PWA Big Data Executive Dashboard (POC)",
+  "designSystemAssetId": "c19a0985bda34489a8ad4532c1cf4f50",
+  "designSystemName": "PWA Analytics Precision",
+  "syncedAt": "2026-07-28T17:53:00+07:00",
+  "sourceUpdateTime": null,
+  "designMdSha256": "9b14fbd8f0eec150718a44e96d2551deebbd520e1f4e27f22f7d2d4efffc098e",
+  "designMdNote": "sha is of DESIGN.source.md (what we UPLOADED). Stitch returned a rewritten designMd; see tokens.map.md. Populate sourceUpdateTime from get_project on the next sync.",
+  "designFrozen": false,
+  "screens": [
+    {
+      "key": "S1",
+      "screenId": "1667d2c0e11548f7a00161393cd727de",
+      "title": "National Executive Dashboard",
+      "png": "screens/S1-executive-national.png",
+      "html": "screens/S1-executive-national.html",
+      "torRef": "ผนวก ๕",
+      "issues": [
+        "fabricated-values",
+        "sections-C-D-dropped",
+        "map-is-placeholder",
+        "thumbnail-only-512px"
+      ]
+    },
+    {
+      "key": "S2",
+      "screenId": "ee08d047c7344c69b81dbbef4c494696",
+      "title": "Regional Drill-down: Region 2",
+      "png": "screens/S2-regional-region2.png",
+      "html": "screens/S2-regional-region2.html",
+      "torRef": "ผนวก ๖",
+      "issues": [
+        "fabricated-table-values",
+        "sections-C-D-dropped",
+        "status-column-colour-only",
+        "thumbnail-only-512px"
+      ]
+    },
+    {
+      "key": "S4",
+      "screenId": "5c3b70ebbc4f4af0b1d8b8d2d155757c",
+      "title": "Operations / SCADA Digital Twin",
+      "png": "screens/S4-operations-twin.png",
+      "html": "screens/S4-operations-twin.html",
+      "torRef": "ผนวก ๘ / demo topic ๒",
+      "demoCritical": true,
+      "issues": [
+        "fabricated-values",
+        "thumbnail-only-512px",
+        "design-target-only-needs-code"
+      ]
+    },
+    {
+      "key": "S8",
+      "title": "Data Pipeline & Quality",
+      "torRef": "ผนวก ๒ / demo topic ๑",
+      "demoCritical": true,
+      "png": "screens/S8-pipeline-quality.png",
+      "html": "screens/S8-pipeline-quality.html",
+      "issues": [
+        "fabricated-values",
+        "thumbnail-only-512px",
+        "design-target-only-needs-code"
+      ]
+    },
+    {
+      "key": "S10",
+      "title": "Predictive / Model Analytics",
+      "torRef": "ผนวก ๓+๔ / demo topic ๓",
+      "demoCritical": true,
+      "png": "screens/S10-predictive.png",
+      "html": "screens/S10-predictive.html",
+      "issues": [
+        "fabricated-values",
+        "thumbnail-only-512px",
+        "design-target-only-needs-code"
+      ]
+    }
+  ],
+  "notGenerated": [
+    {
+      "key": "S3",
+      "title": "Branch Manager dashboard",
+      "torRef": "ผนวก ๗",
+      "demoCritical": false
+    },
+    {
+      "key": "S5",
+      "title": "System Admin",
+      "torRef": "ผนวก ๙",
+      "demoCritical": false
+    },
+    {
+      "key": "S6",
+      "title": "Report Center",
+      "torRef": "ผนวก ๑๐",
+      "demoCritical": false
+    },
+    {
+      "key": "S7",
+      "title": "Notification / Alert Center",
+      "torRef": "ผนวก ๑๑",
+      "demoCritical": false
+    },
+    {
+      "key": "S9",
+      "title": "AI Assistant (conversational)",
+      "torRef": "ผนวก ๔ §2",
+      "demoCritical": false
+    }
+  ]
+}

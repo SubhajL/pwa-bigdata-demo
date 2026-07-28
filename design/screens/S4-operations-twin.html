@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>SCADA Digital Twin - Provincial Waterworks Authority</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&amp;family=IBM+Plex+Sans+Thai:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#004a83",
+                        "background": "#f7f9ff",
+                        "tertiary-fixed": "#ffdcc5",
+                        "on-secondary-fixed": "#001f23",
+                        "on-tertiary-fixed": "#301400",
+                        "on-secondary": "#ffffff",
+                        "status-nodata": "#8A97A3",
+                        "surface-container-high": "#dfe9f7",
+                        "secondary-fixed": "#98f0fb",
+                        "tertiary": "#733900",
+                        "card-white": "#FFFFFF",
+                        "on-background": "#121c27",
+                        "error-container": "#ffdad6",
+                        "canvas": "#F7F9FB",
+                        "primary-fixed": "#d3e4ff",
+                        "inverse-surface": "#27313c",
+                        "surface-container-low": "#edf4ff",
+                        "on-primary-fixed": "#001c38",
+                        "outline": "#717782",
+                        "on-error": "#ffffff",
+                        "status-critical": "#B42318",
+                        "tertiary-container": "#964c00",
+                        "tertiary-fixed-dim": "#ffb783",
+                        "status-normal": "#1E8E5A",
+                        "surface-container-highest": "#d9e3f2",
+                        "surface": "#f7f9ff",
+                        "error": "#ba1a1a",
+                        "inverse-primary": "#a1c9ff",
+                        "secondary-container": "#96eef9",
+                        "on-secondary-fixed-variant": "#004f56",
+                        "on-tertiary-container": "#ffd2b4",
+                        "on-tertiary": "#ffffff",
+                        "surface-container": "#e5effd",
+                        "on-primary-fixed-variant": "#004880",
+                        "secondary-fixed-dim": "#7cd4df",
+                        "outline-variant": "#c1c7d2",
+                        "on-primary": "#ffffff",
+                        "surface-dim": "#d1dbe9",
+                        "primary-container": "#0f62a8",
+                        "on-tertiary-fixed-variant": "#703700",
+                        "border-subtle": "#C6D2DE",
+                        "primary-fixed-dim": "#a1c9ff",
+                        "status-warning": "#B7791F",
+                        "on-primary-container": "#c6ddff",
+                        "on-surface": "#121c27",
+                        "on-surface-variant": "#414751",
+                        "on-error-container": "#93000a",
+                        "on-secondary-container": "#006d77",
+                        "surface-variant": "#d9e3f2",
+                        "simulated-violet": "#7C3AED",
+                        "inverse-on-surface": "#e8f1ff",
+                        "surface-bright": "#f7f9ff",
+                        "secondary": "#006972",
+                        "surface-tint": "#0a60a6",
+                        "surface-container-lowest": "#ffffff"
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "16px", // Overridden as per instructions
+                        "full": "9999px"
+                    },
+                    spacing: {
+                        "table-cell-h": "16px",
+                        "gutter": "24px",
+                        "card-padding": "24px",
+                        "table-cell-v": "12px",
+                        "base": "4px",
+                        "container-max": "1440px"
+                    },
+                    fontFamily: {
+                        "headline-lg": ["IBM Plex Sans", "IBM Plex Sans Thai"],
+                        "metric-display": ["IBM Plex Sans", "IBM Plex Sans Thai"],
+                        "body-reading": ["IBM Plex Sans", "IBM Plex Sans Thai"],
+                        "body-dense": ["IBM Plex Sans", "IBM Plex Sans Thai"],
+                        "label-caps": ["IBM Plex Sans", "IBM Plex Sans Thai"],
+                        "headline-md": ["IBM Plex Sans", "IBM Plex Sans Thai"],
+                        "title-sm": ["IBM Plex Sans", "IBM Plex Sans Thai"]
+                    },
+                    fontSize: {
+                        "headline-lg": ["32px", { lineHeight: "1.2", letterSpacing: "-0.02em", fontWeight: "700" }],
+                        "metric-display": ["34px", { lineHeight: "1.1", letterSpacing: "-0.02em", fontWeight: "600" }],
+                        "body-reading": ["16px", { lineHeight: "1.65", fontWeight: "400" }],
+                        "body-dense": ["14px", { lineHeight: "1.55", fontWeight: "400" }],
+                        "label-caps": ["12px", { lineHeight: "1.0", letterSpacing: "0.06em", fontWeight: "600" }],
+                        "headline-md": ["24px", { lineHeight: "1.3", letterSpacing: "-0.01em", fontWeight: "600" }],
+                        "title-sm": ["18px", { lineHeight: "1.4", fontWeight: "600" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { background-color: #F7F9FB; }
+        .tabular-nums { font-variant-numeric: tabular-nums; }
+        .bg-canvas { background-color: #F7F9FB; }
+        .card-shadow { box-shadow: 0 4px 20px -2px rgba(16, 26, 36, 0.06); }
+        .font-variation-fill { font-variation-settings: 'FILL' 1; }
+    </style>
+</head>
+<body class="font-body-reading text-on-surface antialiased">
+<!-- SideNavBar -->
+<nav class="fixed left-0 top-0 h-full w-[240px] bg-surface flex flex-col py-6 px-4 border-r border-border-subtle z-50">
+<div class="mb-8 px-2 flex items-center gap-3">
+<img alt="PWA Logo" class="w-10 h-10 object-contain" data-alt="A minimalist logo for a water utility, solid blue drop shape inside a circle, flat design, clean lines, high contrast." src="https://lh3.googleusercontent.com/aida-public/AB6AXuA8fCKxsXHgL72g_vVZYwizo5o1ZCRj1RN9L1pYVHU9nc1dK6ZvpeygHzTWFlXnAUOb1L6_K-0YKim51trAwv5iuxA-lV5r_e2_OQBpgA6gF57cuSClG0vuyy6BuCSvo7rNHRcQ2FenYhfGxwTre-FIguiD-TQ7_rUAIFqR3v1WX1Fs4Fhum9sNh3RstIO73xaskuEmMFRiMILMBV2mc6c1-FJv58ctKzmUCt6iOQd84EL83m9neBEaI4pT_KV3C11ZBvSYzuIKUcs6"/>
+<div>
+<h1 class="font-headline-md text-headline-md font-bold text-primary">PWA Analytics</h1>
+<p class="font-label-caps text-label-caps text-on-surface-variant">Big Data Platform</p>
+</div>
+</div>
+<ul class="flex flex-col gap-2">
+<li>
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-low transition-colors duration-200 ease-in-out font-title-sm text-title-sm" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span>Overview</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-low transition-colors duration-200 ease-in-out font-title-sm text-title-sm" href="#">
+<span class="material-symbols-outlined">map</span>
+<span>Regional</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-primary font-bold border-r-4 border-primary bg-surface-container transition-colors duration-200 ease-in-out font-title-sm text-title-sm" href="#">
+<span class="material-symbols-outlined font-variation-fill">hub</span>
+<span>Branch</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-low transition-colors duration-200 ease-in-out font-title-sm text-title-sm" href="#">
+<span class="material-symbols-outlined">check_circle</span>
+<span>Data Quality</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-low transition-colors duration-200 ease-in-out font-title-sm text-title-sm" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span>KPI Settings</span>
+</a>
+</li>
+</ul>
+</nav>
+<!-- TopNavBar -->
+<header class="sticky top-0 z-40 ml-[240px] w-[calc(100%-240px)] bg-canvas border-b border-border-subtle flex justify-between items-center h-16 px-8">
+<div class="flex items-center">
+<span class="font-body-dense text-body-dense text-on-surface-variant">ภาพรวมประเทศ / กปภ.เขต 3 / กปภ.สาขาสมุทรสาคร</span>
+</div>
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-4 hidden md:flex">
+<a class="font-body-dense text-body-dense text-on-surface-variant hover:text-primary transition-all duration-200" href="#">Month Selector</a>
+<a class="font-body-dense text-body-dense text-on-surface-variant hover:text-primary transition-all duration-200" href="#">Export</a>
+</div>
+<button class="bg-primary text-on-primary px-4 py-2 rounded text-body-dense font-title-sm hover:bg-primary-container transition-colors">Export Report</button>
+<div class="flex items-center gap-4 text-on-surface-variant">
+<button class="hover:text-primary transition-colors"><span class="material-symbols-outlined">notifications</span></button>
+<button class="hover:text-primary transition-colors"><span class="material-symbols-outlined">account_circle</span></button>
+</div>
+</div>
+</header>
+<!-- Main Content -->
+<main class="ml-[240px] p-gutter max-w-container-max mx-auto">
+<!-- Header Section -->
+<div class="flex justify-between items-end mb-8">
+<div>
+<div class="flex items-center gap-3 mb-2">
+<h2 class="font-headline-lg text-headline-lg text-on-surface">แผนผังดิจิทัลเรียลไทม์ · Real-time Digital Twin</h2>
+<span class="bg-simulated-violet/10 text-simulated-violet px-2 py-1 rounded font-label-caps text-label-caps uppercase border border-simulated-violet/20">SIMULATED</span>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2 bg-status-normal/10 text-status-normal px-3 py-1.5 rounded-full border border-status-normal/20">
+<div class="w-2 h-2 rounded-full bg-status-normal animate-pulse"></div>
+<span class="material-symbols-outlined text-[16px]">wifi</span>
+<span class="font-body-dense text-body-dense font-medium">MQTT: เชื่อมต่อแล้ว</span>
+</div>
+<span class="font-body-dense text-body-dense text-on-surface-variant">อัปเดตล่าสุด 2 วินาทีที่แล้ว</span>
+</div>
+</div>
+</div>
+<!-- Section A: Device Chips -->
+<div class="flex gap-4 mb-gutter overflow-x-auto pb-2">
+<!-- Total -->
+<div class="flex-1 min-w-[200px] bg-card-white border border-border-subtle rounded-xl p-4 card-shadow flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="p-2 bg-surface-container-low rounded-lg text-primary">
+<span class="material-symbols-outlined">router</span>
+</div>
+<span class="font-title-sm text-title-sm text-on-surface">ทั้งหมด</span>
+</div>
+<span class="font-metric-display text-metric-display tabular-nums">24</span>
+</div>
+<!-- Normal -->
+<div class="flex-1 min-w-[200px] bg-card-white border border-border-subtle rounded-xl p-4 card-shadow flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="p-2 bg-status-normal/10 rounded-lg text-status-normal">
+<span class="material-symbols-outlined">check_circle</span>
+</div>
+<span class="font-title-sm text-title-sm text-on-surface">ปกติ</span>
+</div>
+<span class="font-metric-display text-metric-display tabular-nums text-status-normal">20</span>
+</div>
+<!-- Warning -->
+<div class="flex-1 min-w-[200px] bg-card-white border border-border-subtle rounded-xl p-4 card-shadow flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="p-2 bg-status-warning/10 rounded-lg text-status-warning">
+<span class="material-symbols-outlined">warning</span>
+</div>
+<span class="font-title-sm text-title-sm text-on-surface">เตือน</span>
+</div>
+<span class="font-metric-display text-metric-display tabular-nums text-status-warning">3</span>
+</div>
+<!-- Critical -->
+<div class="flex-1 min-w-[200px] bg-card-white border border-border-subtle rounded-xl p-4 card-shadow flex items-center justify-between border-l-4 border-l-status-critical">
+<div class="flex items-center gap-3">
+<div class="p-2 bg-status-critical/10 rounded-lg text-status-critical">
+<span class="material-symbols-outlined font-variation-fill">report</span>
+</div>
+<span class="font-title-sm text-title-sm text-on-surface">วิกฤต</span>
+</div>
+<span class="font-metric-display text-metric-display tabular-nums text-status-critical">1</span>
+</div>
+<!-- No Data -->
+<div class="flex-1 min-w-[200px] bg-card-white border border-border-subtle rounded-xl p-4 card-shadow flex items-center justify-between opacity-70">
+<div class="flex items-center gap-3">
+<div class="p-2 bg-status-nodata/10 rounded-lg text-status-nodata">
+<span class="material-symbols-outlined">block</span>
+</div>
+<span class="font-title-sm text-title-sm text-on-surface">ไม่มีข้อมูล</span>
+</div>
+<span class="font-metric-display text-metric-display tabular-nums text-status-nodata">0</span>
+</div>
+</div>
+<!-- Grid Layout for B, C, D -->
+<div class="grid grid-cols-12 gap-gutter">
+<!-- Section B: Schematic (8 cols) -->
+<div class="col-span-12 lg:col-span-8 bg-card-white border border-border-subtle rounded-xl card-shadow overflow-hidden flex flex-col h-[500px]">
+<div class="px-card-padding py-4 border-b border-border-subtle flex justify-between items-center bg-surface-bright">
+<h3 class="font-title-sm text-title-sm text-on-surface">Process Schematic</h3>
+<div class="flex gap-2">
+<button class="p-1 border border-border-subtle rounded hover:bg-surface-container-low text-on-surface-variant"><span class="material-symbols-outlined">zoom_in</span></button>
+<button class="p-1 border border-border-subtle rounded hover:bg-surface-container-low text-on-surface-variant"><span class="material-symbols-outlined">zoom_out</span></button>
+<button class="p-1 border border-border-subtle rounded hover:bg-surface-container-low text-on-surface-variant"><span class="material-symbols-outlined">fit_screen</span></button>
+</div>
+</div>
+<div class="flex-1 relative bg-canvas p-6">
+<!-- Conceptual Schematic SVG -->
+<svg class="w-full h-full" height="100%" preserveaspectratio="xMidYMid meet" viewbox="0 0 800 400" width="100%">
+<!-- Grid Background -->
+<defs>
+<pattern height="40" id="grid" patternunits="userSpaceOnUse" width="40">
+<path d="M 40 0 L 0 0 0 40" fill="none" stroke="#E2E8F0" stroke-width="1"></path>
+</pattern>
+</defs>
+<rect fill="url(#grid)" height="100%" width="100%"></rect>
+<!-- Pipes -->
+<path d="M 100 200 L 250 200" fill="none" stroke="#004a83" stroke-width="4"></path>
+<path d="M 250 200 L 350 100 L 450 100 L 500 200 L 600 200" fill="none" stroke="#004a83" stroke-width="4"></path>
+<path d="M 250 200 L 350 300 L 450 300 L 500 200" fill="none" stroke="#004a83" stroke-width="4"></path>
+<path d="M 600 200 L 700 100" fill="none" stroke="#004a83" stroke-width="4"></path>
+<path d="M 600 200 L 700 200" fill="none" stroke="#004a83" stroke-width="4"></path>
+<!-- Red Pipe to DMA-03 -->
+<path class="animate-[dash_1s_linear_infinite]" d="M 600 200 L 700 300" fill="none" stroke="#B42318" stroke-dasharray="10 5" stroke-width="6"></path>
+<style> @keyframes dash { to { stroke-dashoffset: -15; } } </style>
+<!-- Elements -->
+<!-- Intake -->
+<rect fill="#d3e4ff" height="60" rx="4" stroke="#004a83" stroke-width="2" width="50" x="50" y="170"></rect>
+<text class="font-label-caps text-[12px] fill-on-surface" text-anchor="middle" x="75" y="250">INTAKE</text>
+<!-- Pump P-1 -->
+<circle cx="350" cy="100" fill="#FFFFFF" r="30" stroke="#1E8E5A" stroke-width="3"></circle>
+<text class="font-title-sm text-[14px] fill-status-normal font-bold" text-anchor="middle" x="350" y="105">P-1</text>
+<!-- Pump P-2 (Critical) -->
+<circle cx="350" cy="300" fill="#ffdad6" r="30" stroke="#B42318" stroke-width="3"></circle>
+<!-- Alert Icon SVG simplified -->
+<path d="M 350 290 L 350 305 M 350 310 L 350 312" stroke="#B42318" stroke-linecap="round" stroke-width="4"></path>
+<!-- Tooltip Group for P-2 -->
+<g transform="translate(300, 220)">
+<rect fill="#121c27" height="40" opacity="0.9" rx="4" width="220" x="0" y="0"></rect>
+<text class="font-body-dense text-[12px] fill-white" x="10" y="24">P-2 · ปั๊มน้ำ · ผิดปกติ / SEC: 0.42</text>
+</g>
+<!-- Tank -->
+<path d="M 580 160 L 620 160 L 620 240 L 580 240 Z" fill="#edf4ff" stroke="#004a83" stroke-width="2"></path>
+<text class="font-label-caps text-[12px] fill-on-surface" text-anchor="middle" x="600" y="150">TANK</text>
+<!-- DMAs -->
+<rect fill="#FFFFFF" height="40" rx="4" stroke="#C6D2DE" stroke-width="2" width="60" x="700" y="80"></rect>
+<text class="font-label-caps text-[12px] fill-on-surface" text-anchor="middle" x="730" y="105">DMA-01</text>
+<rect fill="#FFFFFF" height="40" rx="4" stroke="#C6D2DE" stroke-width="2" width="60" x="700" y="180"></rect>
+<text class="font-label-caps text-[12px] fill-on-surface" text-anchor="middle" x="730" y="205">DMA-02</text>
+<!-- DMA-03 Problem -->
+<rect fill="#ffdad6" height="40" rx="4" stroke="#B42318" stroke-width="2" width="60" x="700" y="280"></rect>
+<text class="font-label-caps text-[12px] fill-status-critical font-bold" text-anchor="middle" x="730" y="305">DMA-03</text>
+<text class="font-label-caps text-[12px] fill-status-critical font-bold" text-anchor="middle" x="730" y="340">แรงดันตก</text>
+</svg>
+</div>
+</div>
+<!-- Section B: Affected Customers (4 cols) -->
+<div class="col-span-12 lg:col-span-4 bg-card-white border border-border-subtle rounded-xl card-shadow flex flex-col h-[500px]">
+<div class="px-card-padding py-4 border-b border-border-subtle flex justify-between items-center bg-surface-bright">
+<h3 class="font-title-sm text-title-sm text-on-surface flex items-center gap-2">
+                        ผู้ใช้น้ำที่ได้รับผลกระทบ
+                        <span class="bg-simulated-violet/10 text-simulated-violet px-2 py-0.5 rounded font-label-caps text-[10px] uppercase border border-simulated-violet/20">SIMULATED</span>
+</h3>
+</div>
+<div class="p-card-padding bg-error-container/20 border-b border-border-subtle">
+<div class="flex items-start gap-3">
+<span class="material-symbols-outlined text-status-critical">warning</span>
+<div>
+<p class="font-title-sm text-title-sm text-status-critical">ได้รับผลกระทบ 1,284 ราย</p>
+<p class="font-body-dense text-body-dense text-status-critical opacity-80">ในพื้นที่ DMA-03</p>
+</div>
+</div>
+</div>
+<div class="flex-1 overflow-auto">
+<table class="w-full text-left border-collapse">
+<thead class="sticky top-0 bg-surface-bright border-b border-border-subtle z-10">
+<tr>
+<th class="font-label-caps text-label-caps text-on-surface-variant p-table-cell-v px-table-cell-h font-semibold">ID</th>
+<th class="font-label-caps text-label-caps text-on-surface-variant p-table-cell-v px-table-cell-h font-semibold">Area</th>
+<th class="font-label-caps text-label-caps text-on-surface-variant p-table-cell-v px-table-cell-h font-semibold">Status</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-border-subtle font-body-dense text-body-dense">
+<tr class="hover:bg-surface-container-lowest transition-colors">
+<td class="p-table-cell-v px-table-cell-h tabular-nums text-on-surface">72-1-00841</td>
+<td class="p-table-cell-v px-table-cell-h text-on-surface">ต.ท่าจีน</td>
+<td class="p-table-cell-v px-table-cell-h text-status-critical font-medium">ได้รับผลกระทบ</td>
+</tr>
+<tr class="hover:bg-surface-container-lowest transition-colors bg-canvas/50">
+<td class="p-table-cell-v px-table-cell-h tabular-nums text-on-surface">72-1-00842</td>
+<td class="p-table-cell-v px-table-cell-h text-on-surface">ต.ท่าจีน</td>
+<td class="p-table-cell-v px-table-cell-h text-status-critical font-medium">ได้รับผลกระทบ</td>
+</tr>
+<tr class="hover:bg-surface-container-lowest transition-colors">
+<td class="p-table-cell-v px-table-cell-h tabular-nums text-on-surface">72-1-00910</td>
+<td class="p-table-cell-v px-table-cell-h text-on-surface">มหาชัย</td>
+<td class="p-table-cell-v px-table-cell-h text-status-critical font-medium">ได้รับผลกระทบ</td>
+</tr>
+<tr class="hover:bg-surface-container-lowest transition-colors bg-canvas/50">
+<td class="p-table-cell-v px-table-cell-h tabular-nums text-on-surface">72-1-00915</td>
+<td class="p-table-cell-v px-table-cell-h text-on-surface">มหาชัย</td>
+<td class="p-table-cell-v px-table-cell-h text-status-warning font-medium">เฝ้าระวัง</td>
+</tr>
+<tr class="hover:bg-surface-container-lowest transition-colors">
+<td class="p-table-cell-v px-table-cell-h tabular-nums text-on-surface">72-2-01102</td>
+<td class="p-table-cell-v px-table-cell-h text-on-surface">โกรกกราก</td>
+<td class="p-table-cell-v px-table-cell-h text-status-normal font-medium">ปกติ</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<!-- Section C: Charts (6 cols each) -->
+<!-- DMA-03 Chart -->
+<div class="col-span-12 lg:col-span-6 bg-card-white border border-border-subtle rounded-xl p-card-padding card-shadow">
+<div class="flex justify-between items-center mb-6">
+<h3 class="font-title-sm text-title-sm text-on-surface flex items-center gap-2">
+                        แรงดันน้ำ DMA-03 · 60 นาทีล่าสุด
+                        <span class="bg-simulated-violet/10 text-simulated-violet px-2 py-0.5 rounded font-label-caps text-[10px] uppercase border border-simulated-violet/20">SIMULATED</span>
+</h3>
+<div class="text-right">
+<span class="font-metric-display text-metric-display tabular-nums text-status-critical">1.2</span>
+<span class="font-body-dense text-body-dense text-on-surface-variant">bar</span>
+</div>
+</div>
+<div class="h-48 w-full relative">
+<!-- Placeholder for Chart -->
+<svg class="overflow-visible" height="100%" preserveaspectratio="none" viewbox="0 0 500 150" width="100%">
+<!-- Y-Axis Grid -->
+<line stroke="#E2E8F0" stroke-dasharray="4 4" x1="0" x2="500" y1="20" y2="20"></line>
+<line stroke="#E2E8F0" stroke-dasharray="4 4" x1="0" x2="500" y1="75" y2="75"></line>
+<line stroke="#E2E8F0" stroke-dasharray="4 4" x1="0" x2="500" y1="130" y2="130"></line>
+<!-- Threshold Line -->
+<line stroke="#717782" stroke-dasharray="6 4" stroke-width="1.5" x1="0" x2="500" y1="90" y2="90"></line>
+<text class="font-label-caps text-[10px] fill-outline" x="5" y="85">เกณฑ์ขั้นต่ำ (1.5 bar)</text>
+<!-- Data Line trending down -->
+<path d="M 0 30 Q 50 25, 100 40 T 200 60 T 300 80 T 400 110 T 500 120" fill="none" stroke="#004a83" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"></path>
+<!-- Gradient Fill under line -->
+<path d="M 0 30 Q 50 25, 100 40 T 200 60 T 300 80 T 400 110 T 500 120 L 500 150 L 0 150 Z" fill="url(#blue-grad)" opacity="0.1"></path>
+<defs>
+<lineargradient id="blue-grad" x1="0" x2="0" y1="0" y2="1">
+<stop offset="0%" stop-color="#004a83"></stop>
+<stop offset="100%" stop-color="#ffffff" stop-opacity="0"></stop>
+</lineargradient>
+</defs>
+</svg>
+<div class="flex justify-between mt-2 font-label-caps text-[10px] text-on-surface-variant">
+<span>-60m</span>
+<span>-45m</span>
+<span>-30m</span>
+<span>-15m</span>
+<span>Now</span>
+</div>
+</div>
+</div>
+<!-- P-2 Sparklines -->
+<div class="col-span-12 lg:col-span-6 flex flex-col gap-gutter">
+<!-- Flow Rate -->
+<div class="flex-1 bg-card-white border border-border-subtle rounded-xl p-card-padding card-shadow flex items-center gap-6">
+<div class="w-1/3">
+<div class="flex items-center gap-2 mb-1">
+<h4 class="font-title-sm text-body-dense text-on-surface-variant">อัตราการไหล</h4>
+<span class="bg-simulated-violet/10 text-simulated-violet px-1.5 py-0.5 rounded font-label-caps text-[8px] uppercase border border-simulated-violet/20">SIM</span>
+</div>
+<div class="flex items-baseline gap-1">
+<span class="font-headline-md text-headline-md tabular-nums text-on-surface">450</span>
+<span class="font-label-caps text-label-caps text-on-surface-variant">ลบ.ม./ชม.</span>
+</div>
+<span class="font-body-dense text-[12px] text-status-critical flex items-center"><span class="material-symbols-outlined text-[14px]">arrow_downward</span> -12%</span>
+</div>
+<div class="w-2/3 h-16">
+<svg height="100%" preserveaspectratio="none" viewbox="0 0 200 50" width="100%">
+<path d="M 0 10 L 40 15 L 80 12 L 120 25 L 160 40 L 200 45" fill="none" stroke="#004a83" stroke-width="2"></path>
+</svg>
+</div>
+</div>
+<!-- Power -->
+<div class="flex-1 bg-card-white border border-border-subtle rounded-xl p-card-padding card-shadow flex items-center gap-6 border-l-4 border-l-status-critical">
+<div class="w-1/3">
+<div class="flex items-center gap-2 mb-1">
+<h4 class="font-title-sm text-body-dense text-on-surface-variant">กำลังไฟฟ้า P-2</h4>
+<span class="bg-simulated-violet/10 text-simulated-violet px-1.5 py-0.5 rounded font-label-caps text-[8px] uppercase border border-simulated-violet/20">SIM</span>
+</div>
+<div class="flex items-baseline gap-1">
+<span class="font-headline-md text-headline-md tabular-nums text-status-critical">185</span>
+<span class="font-label-caps text-label-caps text-on-surface-variant">kW</span>
+</div>
+<span class="font-body-dense text-[12px] text-status-critical flex items-center"><span class="material-symbols-outlined text-[14px]">arrow_upward</span> +24%</span>
+</div>
+<div class="w-2/3 h-16">
+<svg height="100%" preserveaspectratio="none" viewbox="0 0 200 50" width="100%">
+<line stroke="#E2E8F0" stroke-dasharray="4 4" x1="0" x2="200" y1="25" y2="25"></line>
+<path d="M 0 40 L 40 35 L 80 38 L 120 15 L 160 5 L 200 10" fill="none" stroke="#B42318" stroke-width="2"></path>
+</svg>
+</div>
+</div>
+</div>
+<!-- Section D: Event Log (12 cols) -->
+<div class="col-span-12 bg-card-white border border-border-subtle rounded-xl card-shadow overflow-hidden mb-8">
+<div class="px-card-padding py-4 border-b border-border-subtle bg-surface-bright">
+<h3 class="font-title-sm text-title-sm text-on-surface">บันทึกเหตุการณ์เรียลไทม์</h3>
+</div>
+<div class="divide-y divide-border-subtle">
+<!-- Critical Event -->
+<div class="px-card-padding py-3 flex items-start gap-4 hover:bg-surface-container-lowest transition-colors bg-error-container/10">
+<div class="w-24 shrink-0 font-body-dense text-[12px] text-on-surface-variant pt-1 tabular-nums">10:42:15 น.</div>
+<div class="p-1.5 bg-status-critical/10 rounded text-status-critical">
+<span class="material-symbols-outlined text-[18px]">electric_bolt</span>
+</div>
+<div>
+<p class="font-body-dense text-body-dense text-on-surface font-medium">ปั๊มน้ำ P-2 ใช้กระแสไฟฟ้าสูงผิดปกติ</p>
+<p class="font-body-dense text-[12px] text-on-surface-variant">SEC สูงถึง 0.42 kWh/m³ เกินเกณฑ์มาตรฐานที่ 0.35 แนะนำให้ตรวจสอบมอเตอร์</p>
+</div>
+</div>
+<!-- Warning Event -->
+<div class="px-card-padding py-3 flex items-start gap-4 hover:bg-surface-container-lowest transition-colors">
+<div class="w-24 shrink-0 font-body-dense text-[12px] text-on-surface-variant pt-1 tabular-nums">10:38:02 น.</div>
+<div class="p-1.5 bg-status-warning/10 rounded text-status-warning">
+<span class="material-symbols-outlined text-[18px]">speed</span>
+</div>
+<div>
+<p class="font-body-dense text-body-dense text-on-surface">แรงดันน้ำ DMA-03 ต่ำกว่าเกณฑ์</p>
+<p class="font-body-dense text-[12px] text-on-surface-variant">แรงดันตกลงที่ 1.4 bar แนวโน้มลดลงต่อเนื่อง</p>
+</div>
+</div>
+<!-- Info Event -->
+<div class="px-card-padding py-3 flex items-start gap-4 hover:bg-surface-container-lowest transition-colors">
+<div class="w-24 shrink-0 font-body-dense text-[12px] text-on-surface-variant pt-1 tabular-nums">10:15:00 น.</div>
+<div class="p-1.5 bg-primary/10 rounded text-primary">
+<span class="material-symbols-outlined text-[18px]">info</span>
+</div>
+<div>
+<p class="font-body-dense text-body-dense text-on-surface">เริ่มการจำลองสถานการณ์ (Simulation)</p>
+<p class="font-body-dense text-[12px] text-on-surface-variant">ผู้ใช้ระบบเรียกใช้งาน Digital Twin Module เพื่อวิเคราะห์ผลกระทบ</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer Component Anchor -->
+<footer class="ml-[240px] w-[calc(100%-240px)] p-4 bg-surface-container-lowest border-t border-border-subtle flex flex-row justify-between items-center px-8">
+<div class="font-label-caps text-label-caps uppercase tracking-widest text-on-surface-variant">
+            © Provincial Waterworks Authority Data Trust Protocol
+        </div>
+<div class="flex gap-6 font-body-dense text-body-dense text-on-surface-variant">
+<a class="hover:text-primary transition-opacity duration-150" href="#">Data Security Policy</a>
+<a class="hover:text-primary transition-opacity duration-150" href="#">System Status</a>
+<a class="hover:text-primary transition-opacity duration-150" href="#">Contact Support</a>
+</div>
+</footer>
+</body></html>
