@@ -627,3 +627,97 @@ Ground truth for the curated tests was **measured, not remembered**: 9 126 rows,
 `branch_code`, 235 labels (one branch renamed), 39 months, regions 1–10, and a 2025-12 total
 of **120 999 833.55 m³** — which is the figure printed on the Stitch mockup, so it is an
 external anchor rather than a self-consistency check.
+
+---
+
+## PR-7a — digital-twin data chain (2026-07-29) [Mode A, **SL-3**]
+
+Plan: `docs/DREP-PR7-twin.md`. Delegate: DeepSeek V4 Pro via `pi`, session `pr7a-twin-chain`.
+**0 delegate fix rounds** (all review findings landed in Claude-owned files).
+
+### The planning pass is what earned its keep here
+
+My first PR-7 draft scoped the slice as "build the SVG twin screen". The Codex adversarial
+pass killed it, and it was right: **the fatal gap was never the SVG, it was a missing runtime
+identity chain** — `telemetry asset → topology node/pipe → WS event → impact query → rendered
+pipe`. Three links did not exist:
+
+1. **No device could be located on the schematic.** The roster publishes the demo pump as
+   `P-2` (`simulator/app/roster.py:40`) while the topology seeded its node as `P2`
+   (`scripts/seed_db.py`). No join returned anything, and nothing failed — there was simply
+   no result. Neither `device` nor `pipe_edge` carried any coordinate either, so **scored
+   item 2.1 had no ground truth at all**.
+2. **Ingest cannot report an anomaly.** `_emit_twin_event` hardcodes `status="normal"` and
+   discards `signal`/`value`, so a pump going critical is invisible to the twin.
+3. **A pressure drop cannot name a pipe.** `TwinEvent` has no `pipe_id`, and the simulator
+   has no `pressure_drop` mode.
+
+Building the screen first would have produced a convincing picture wired to nothing — worse
+than no screen under a judge's questions. **PR-7 therefore split into three**: 7a the data
+chain (this), 7b the event chain, 7c the screen. Nothing was dropped; the split is landing
+order, and `docs/DREP-PR7-twin.md` records which PR owns each scored item.
+
+### What landed
+
+`006_twin_topology.sql` (device node + x/y, pipe geometry, `pipe_edge(from_node)` and
+`customer_service_point(node)` indexes, and `(asset_id, signal, ts DESC) INCLUDE (value)`);
+the seed identity + geometry fix; `topology.py`; `latest_signal_pair`; and
+`GET /api/twin/{topology,sec/{asset_id},impact/{pipe_id}}`.
+
+**Claude:** the migration and the seed (Q0 — a migration is never delegated, and the seed
+must agree with it), every test, all models and signatures, and all review fixes.
+**Delegate:** the six function bodies.
+
+### Mutation evidence
+
+- **T1 (the identity defect)** was green when written, because Claude had already fixed the
+  seed — so it was mutation-verified: re-orphaning the device's node from `pipe_edge` yields
+  `assert [('P-2', 'P-2')] == []`, exactly the shape the original bug produced.
+- **The seed upgrade path** — see below — mutation-verified against the `pipe_id`-only
+  DELETE it replaced.
+- **The SEC skew guard** — disabling it fails `test_widely_separated_readings_...`.
+
+### QCHECK — Tier 1 Claude, Tier 2 Codex `gpt-5.6-sol` @ xhigh. Verdict **BLOCK**, 3 HIGH.
+
+The HIGH that mattered was **mine, in the seed, and it only breaks upgraded volumes**:
+
+> Re-seeding deleted retired edges with `WHERE dma='DMA-03' AND pipe_id <> ALL(...)`. The
+> legacy rows share their `pipe_id` with the new ones (`PIPE-INTAKE`, `PIPE-P2-TANK`) and
+> differ only in the node, so that filter **matched the new rows and missed the legacy
+> ones** — which then survived with NULL geometry, and `float(None)` in `load_topology`
+> would 500 `/api/twin/topology`. Fresh volumes were unaffected, so every test passed. The
+> same statement would also have deleted any DMA-03 edge an operator added by hand.
+
+Fixed by retiring an explicit list of exact `(pipe_id, from_node, to_node)` triples — a seed
+may retire what it wrote, never what it does not own — and covered by
+`test_reseed_retires_legacy_edges_and_keeps_operator_edges`, which stages a pre-S4a volume
+plus an operator edge and is mutation-verified.
+
+Also fixed: **the skew test did not test skew** (its hour-old reading exited through the
+staleness guard first, so deleting the skew guard left it green — now a 200 s gap, inside
+staleness and above the 120 s budget); and `load_topology`'s docstring promised a "latest
+known status" the code does not read.
+
+### Declared gaps (not silently dropped)
+
+- **`/api/twin/topology` returns `status: "nodata"` for every device, permanently.** Nothing
+  persists a per-device twin status yet — ingest still emits a hardcoded `normal`. That is
+  **PR-7b**'s job. `nodata` is the honest answer to a question we cannot yet answer, and it
+  must never default to `normal`: an unknown device must not render healthy in a control room.
+- `MAX_TRAVERSAL_DEPTH` is defined but unused — `downstream_customers` loads the whole edge
+  graph in one query, which is right for five edges and wrong for a large one. Owner: PR-7b.
+- The EXPLAIN assertion accepts a plan containing one index scan; a multi-chunk plan with
+  sequential-scan siblings would pass. Owner: PR-17, with the rest of the performance work.
+- **The Stitch mockup shows "1,204 ราย" affected customers; the real topology has five.**
+  `design/manifest.json` already flags S4 as `fabricated-values`. PR-7c must render the real
+  count from `/api/twin/impact`.
+- **Item 2.5 is not closed by any of 7a/7b/7c alone** — the checklist wants the source
+  structure shown in the IDE, which is a demo action PR-17 owns.
+
+### Verified by Claude, under Claude's own hand
+
+`api`: **215 tests, 3 consecutive runs** (baseline 193 after PR-6), ruff clean, mypy
+`--strict` clean across 42 files. Diff audit clean: the delegate touched only its three
+files, no fabricated data, no test weakened. The delegate reported "1 pre-existing
+`test_latency` failure" — **that was wrong; the full suite is green**, which is exactly why
+the gates are re-run rather than trusted.

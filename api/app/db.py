@@ -14,7 +14,7 @@ import base64
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, NamedTuple
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -304,3 +304,67 @@ def conservation_counts(pool: ConnectionPool, run_id: str) -> dict[str, int]:
         cur.execute(CONSERVATION_QUERY, (run_id, run_id, run_id))
         row = cur.fetchone() or (0, 0, 0)
     return {"ledger": int(row[0]), "telemetry": int(row[1]), "dead_letter": int(row[2])}
+
+
+#: SEC needs the newest `power_kw` AND the newest `flow_m3h` for one asset. Telemetry stores
+#: ONE SIGNAL PER ROW and the simulator cycles signals, so these are different rows with
+#: different timestamps — `LATEST_QUERY`'s `(asset_id, ts DESC)` index returns the newest row
+#: of ANY signal and cannot serve this. `006_twin_topology.sql` adds
+#: `(asset_id, signal, ts DESC) INCLUDE (value)` for exactly this shape, and
+#: `test_twin_routes.py` pins it with its own EXPLAIN assertion — `test_latency.py` covers
+#: only LATEST_QUERY and would stay green while this one sorted history.
+LATEST_PER_SIGNAL_QUERY = """
+    SELECT DISTINCT ON (signal) signal, value, ts
+    FROM telemetry
+    WHERE asset_id = %s AND signal = ANY(%s)
+    ORDER BY signal, ts DESC
+"""
+
+
+class SignalPair(NamedTuple):
+    """Newest reading of two signals for one asset, each with its OWN timestamp.
+
+    A single `as_of` cannot describe both: the readings normally arrive seconds or minutes
+    apart, and collapsing them would let SEC be computed from unrelated snapshots while
+    looking authoritative.
+    """
+
+    power_kw: float | None
+    power_observed_at: datetime | None
+    flow_m3h: float | None
+    flow_observed_at: datetime | None
+
+    @property
+    def skew_s(self) -> float | None:
+        """Absolute gap between the two observations, or None if either is missing."""
+        if self.power_observed_at is None or self.flow_observed_at is None:
+            return None
+        return abs((self.power_observed_at - self.flow_observed_at).total_seconds())
+
+
+def latest_signal_pair(pool: ConnectionPool, asset_id: str) -> SignalPair:
+    """Newest `power_kw` and `flow_m3h` for `asset_id`, each with its own timestamp.
+
+    Either side may be None when that signal has never been recorded. Must run as an index
+    scan over `telemetry_asset_signal_ts_idx`; see LATEST_PER_SIGNAL_QUERY.
+    """
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(LATEST_PER_SIGNAL_QUERY, (asset_id, ["power_kw", "flow_m3h"]))
+        rows = cur.fetchall()
+    by_signal: dict[str, tuple[float, datetime]] = {}
+    for row in rows:
+        signal, value, ts = row
+        if signal not in by_signal:
+            by_signal[signal] = (float(value), ts)
+    power_kw, power_observed_at = (
+        by_signal["power_kw"] if "power_kw" in by_signal else (None, None)
+    )
+    flow_m3h, flow_observed_at = (
+        by_signal["flow_m3h"] if "flow_m3h" in by_signal else (None, None)
+    )
+    return SignalPair(
+        power_kw=power_kw,
+        power_observed_at=power_observed_at,
+        flow_m3h=flow_m3h,
+        flow_observed_at=flow_observed_at,
+    )
