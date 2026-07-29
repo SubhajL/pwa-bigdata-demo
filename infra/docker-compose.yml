@@ -61,6 +61,20 @@ services:
       MQTT_HOST: mosquitto
       MQTT_PORT: "1883"
       RATE_HZ: "5"
+      # The roster is derived from the real branch CSV, which is bind-mounted
+      # rather than baked into the image (data/ is outside the build context).
+      CURATED_PATH: /srv/data/curated/water_sold_by_branch.csv
+      # Blank => a fresh uuid per container start, so message_ids never collide
+      # across restarts. The demo director pins this to label a scenario run.
+      # NOTE: an empty env var is still "provided" to pydantic-settings, so the
+      # blank is normalised back to a generated id by SimSettings._reject_blank_run_id.
+      RUN_ID: ""
+      FAULT_MODE: normal         # normal | anomaly | bad_asset | malformed
+    volumes:
+      - ../data/curated:/srv/data/curated:ro
+    # Scored item 1.2 is demonstrated by restarting the broker. The producer must
+    # come back with it, or there is no traffic left to show the consumer recovered.
+    restart: unless-stopped
     depends_on:
       mosquitto:
         condition: service_healthy

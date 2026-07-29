@@ -1,0 +1,13 @@
+# Gate tooling for `simulator/` — pytest · ruff · mypy, matching api/.
+# Kept out of requirements.txt so the runtime image stays lean.
+-r requirements.txt
+
+pytest==8.3.4
+jsonschema==4.23.0
+ruff==0.8.6
+mypy==1.14.1
+
+# Needed only by tests/test_roster.py::test_roster_matches_seed_db_exactly, which
+# imports scripts/seed_db.py to prove the simulator roster and the DB seed cannot
+# drift apart. seed_db imports psycopg at module scope.
+psycopg[binary]==3.2.3

@@ -1,1 +1,6 @@
+# PWA demo simulator — RUNTIME deps only, pinned (Codex #12). Python 3.13.
+# The Dockerfile installs this file, so gate tooling deliberately lives in
+# requirements-dev.txt and is not shipped in the image.
 paho-mqtt==2.1.0
+pydantic==2.10.4
+pydantic-settings==2.7.0
