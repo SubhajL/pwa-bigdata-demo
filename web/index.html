@@ -1,5 +1,14 @@
 <!doctype html>
+<!-- lang="th" is load-bearing: it selects Thai line-breaking and tells a screen reader
+     which language to speak. a11y.test.tsx asserts it survives every edit to this file. -->
 <html lang="th">
-  <head><meta charset="UTF-8" /><title>PWA Analytics</title></head>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Opts the document into both schemes so light-dark() in globals.css resolves and
+         the UA paints form controls and scrollbars to match. -->
+    <meta name="color-scheme" content="light dark" />
+    <title>PWA Analytics · ระบบวิเคราะห์ข้อมูลขนาดใหญ่</title>
+  </head>
   <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
 </html>

@@ -15,7 +15,16 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "types": ["vitest/globals", "@testing-library/jest-dom"]
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "types": ["vitest/globals", "@testing-library/jest-dom", "node"]
   },
+  // `vite.config.ts` is deliberately NOT type-checked here (it never was). vitest 2.1.8
+  // resolves its own vite@5 types, so pulling `vitest/config` into this program makes
+  // tsc compare vite 5 and vite 6 `UserConfig` shapes and fail on unrelated internals.
+  // Vite loads the config through esbuild at runtime, and `tokens.test.ts` (T18) asserts
+  // its contents as TEXT, so nothing is left unverified by the exclusion.
   "include": ["src"]
 }

@@ -1,0 +1,142 @@
+/* globals.css — THE token contract.
+ *
+ * Authored by Claude at stop line SL-3 (DREP-PR6-foundation §8). This is the one file
+ * in `src/` allowed to contain a colour, a duration or a shadow literal; every other
+ * module reaches them through a token, and `tokens.test.ts` fails the build otherwise.
+ *
+ * SOURCE OF TRUTH: `design/tokens.map.md`. NOT `design/DESIGN.source.md`, and NOT the
+ * Stitch HTML under `design/screens/` — both drifted from what we specified (Stitch
+ * returned `#f7f9ff` for our `#F7F9FB` and demoted `--primary` to `--primary-container`).
+ *
+ * Every colour below is the OKLCH form of the hex recorded in that table, converted with
+ * the standard sRGB->Oklab matrices. `tokens.test.ts` converts each value BACK and fails
+ * if it lands more than ΔE-OK 0.02 from the documented hex — so this file cannot drift
+ * from the table without a red test. The conversion was validated independently: the
+ * table documents dark `--status-warning` sitting at "L 0.734", and the value below
+ * computes to 0.7336.
+ *
+ * WHY light-dark() AND NOT A DARK MEDIA BLOCK: a second `@media (prefers-color-scheme:
+ * dark)` block would give every token two definition sites that drift apart one careless
+ * edit at a time. `light-dark()` keeps both schemes on one line, and `tokens.test.ts`
+ * asserts no scheme-specific colour override exists.
+ */
+
+@import "tailwindcss";
+
+/* Self-hosted, never a CDN: the demo runs on-prem and must render Thai with no internet.
+ * Only the two weights the type scale actually uses (body 400, title/metric/label 600),
+ * in the two subsets this UI mixes (Thai + Latin). */
+@import "@fontsource/ibm-plex-sans-thai/thai-400.css";
+@import "@fontsource/ibm-plex-sans-thai/thai-600.css";
+@import "@fontsource/ibm-plex-sans-thai/latin-400.css";
+@import "@fontsource/ibm-plex-sans-thai/latin-600.css";
+
+@theme {
+  --font-sans: "IBM Plex Sans Thai", ui-sans-serif, system-ui, sans-serif;
+
+  /* ── Colour ─────────────────────────────────────────────────────────────────
+   * light-dark(<light>, <dark>), driven by `color-scheme: light dark` on :root.
+   * Doc token `--surface` is emitted here as `--color-surface` so Tailwind also
+   * generates `bg-surface` / `text-surface` / `border-surface`. tokens.test.ts
+   * maps the doc name onto the `--color-` prefix. */
+  --color-surface: light-dark(oklch(98.12% 0.0034 247.86), oklch(19.82% 0.0229 257.29));
+  --color-surface-container-lowest: light-dark(oklch(100% 0 89.88), oklch(23.31% 0.0261 258.32));
+  --color-surface-container: light-dark(oklch(95.23% 0.0103 247.93), oklch(27.4% 0.0297 256.85));
+  --color-on-surface: light-dark(oklch(21.32% 0.0247 249.05), oklch(94.66% 0.0114 252.09));
+  --color-on-surface-variant: light-dark(oklch(43.16% 0.0279 246.51), oklch(77.3% 0.0254 248.16));
+  --color-outline-variant: light-dark(oklch(85.83% 0.0212 248.08), oklch(34.26% 0.0323 250.53));
+  --color-primary: light-dark(oklch(48.89% 0.1334 250.59), oklch(70.93% 0.1176 245.77));
+  --color-secondary: light-dark(oklch(53.62% 0.0888 205.03), oklch(75.51% 0.1057 203.76));
+
+  /* Status. Validated palette: worst adjacent ΔE 17.4 for normal vision, all ≥3:1 on
+   * canvas. Dark `--status-warning` is a DOCUMENTED exception at L 0.7336, above the
+   * validator's ~0.70 dark ceiling — every alternative inside the band collapsed CVD
+   * separation against `critical` below the ΔE 8 floor. It ships ONLY because status
+   * always carries an icon and a Thai label (see StatusChip). If status is ever rendered
+   * as a bare colour swatch, this token is invalid. */
+  --color-status-normal: light-dark(oklch(57.35% 0.1258 157.37), oklch(63.84% 0.1292 159.37));
+  --color-status-warning: light-dark(oklch(62.64% 0.1248 70.45), oklch(73.36% 0.1451 87.78));
+  --color-status-critical: light-dark(oklch(50.03% 0.1821 29.51), oklch(66.16% 0.1935 21.68));
+  --color-status-nodata: light-dark(oklch(66.99% 0.0232 245.99), oklch(57.21% 0.028 246.46));
+
+  /* RESERVED. Violet means "this number is simulated" and nothing else. Any violet
+   * outside SimulatedBadge is a bug, and markers.test.tsx enforces it. */
+  --color-simulated: light-dark(oklch(54.13% 0.2466 293.01), oklch(70.9% 0.1592 293.54));
+
+  /* ON-colours. Added in PR-6 because their absence was actively harmful: with no token
+   * to reach for, the first implementation used Tailwind's `text-white` on both
+   * `--primary` and `--simulated`. Correct in light mode, BROKEN in dark — dark primary
+   * is a light blue and dark simulated a light violet, giving white 2.55:1 and 2.72:1.
+   * These flip to a dark ink in dark mode: 6.30/6.88:1 and 5.70/6.46:1. */
+  --color-on-primary: light-dark(oklch(100% 0 89.88), oklch(21.32% 0.0247 249.05));
+  --color-on-simulated: light-dark(oklch(100% 0 89.88), oklch(21.32% 0.0247 249.05));
+
+  /* Sequential ramp — magnitude only (maps, bars). One hue, monotonic lightness.
+   * NEVER categorical, never a rainbow: regions are compared by size, not identity.
+   * Steps 1–2 fall below 3:1 on the surface, which is acceptable for a FILL but
+   * obligates a visible value label or a table view alongside. */
+  --color-seq-1: light-dark(oklch(92.81% 0.0225 248.07), oklch(30.97% 0.0596 249.56));
+  --color-seq-2: light-dark(oklch(81.93% 0.0547 246.79), oklch(39.95% 0.0847 249.4));
+  --color-seq-3: light-dark(oklch(67.08% 0.1089 247.5), oklch(53.15% 0.1205 250.88));
+  --color-seq-4: light-dark(oklch(53.15% 0.1205 250.88), oklch(67.08% 0.1089 247.5));
+  --color-seq-5: light-dark(oklch(40.7% 0.1052 251.34), oklch(81.93% 0.0547 246.79));
+
+  /* Shape */
+  --radius-card: 1rem;
+  --radius-control: 0.75rem;
+  --radius-pill: 9999px;
+
+  /* Elevation — authored here; Stitch emits no shadow tokens at all. */
+  --shadow-card: 0 4px 20px -2px oklch(21.32% 0.0247 249.05 / 0.06);
+  --shadow-popover: 0 10px 15px -3px oklch(21.32% 0.0247 249.05 / 0.1);
+
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+:root {
+  /* Makes light-dark() resolve, and tells the UA to render form controls and
+   * scrollbars in the matching scheme. tokens.test.ts asserts this is present:
+   * without it every light-dark() silently collapses to its light branch. */
+  color-scheme: light dark;
+
+  /* Motion. Authored here — Stitch emits no motion tokens. Every transition and
+   * animation in `src/` must reference one of these; a bare `150ms` anywhere else
+   * fails tokens.test.ts. */
+  --anim-fast: 150ms;
+  --anim-medium: 250ms;
+  --anim-slow: 400ms;
+}
+
+html {
+  font-family: var(--font-sans);
+}
+
+body {
+  background-color: var(--color-surface);
+  color: var(--color-on-surface);
+  /* 1.6 sits inside the 1.55–1.65 band Thai ascenders and tone marks need; tighter
+   * and the marks collide with the line above. */
+  line-height: 1.6;
+  /* NO letter-spacing on Thai — it breaks glyph clusters. The +0.06em label tracking
+   * in the type scale is Latin-only and is applied per-component, never globally. */
+  letter-spacing: 0;
+}
+
+/* Every numeral is tabular so columns of figures align and a KPI does not reflow as it
+ * updates. `Num` (components/ui/num.tsx) is the only sanctioned way to render one. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Zeroes BOTH transition and animation. A block that names only one leaves half the
+   * motion alive, which is the failure tokens.test.ts checks for. */
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}

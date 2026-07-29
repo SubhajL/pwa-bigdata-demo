@@ -1,0 +1,45 @@
+# Root .dockerignore.
+#
+# The api / migrate / seed / backfill images all build with the REPOSITORY ROOT as their
+# context (see infra/docker-compose.yml `context: ..`), so without this every one of them
+# uploads the whole tree. That became a real cost in PR-6, which installs the frontend's
+# node_modules — hundreds of megabytes shipped to the daemon on every backend build.
+#
+# `web/.dockerignore` does not help: a .dockerignore only applies to the context ROOT.
+
+# Frontend build output and dependencies
+web/node_modules
+web/dist
+web/.vite
+
+# Python artefacts
+**/__pycache__
+**/*.py[cod]
+**/.venv
+**/venv
+**/.mypy_cache
+**/.pytest_cache
+**/.ruff_cache
+ml/artifacts
+
+# VCS, editors, local env
+.git
+.gitignore
+**/.DS_Store
+.idea
+.vscode
+.env
+*.log
+
+# Source data. NOTHING under data/ belongs in an image: `data/curated` is bind-mounted at
+# runtime by the `api`, `seed` and `simulator` services, and `data/raw` is large and unused
+# by any service. (The earlier version of this file excluded only `data/raw` while its own
+# comment claimed curated was excluded too — so every backend build still shipped the real
+# CSV to the daemon.)
+data/
+
+# Docs and design assets are not needed by any image.
+docs
+design
+coding-logs
+.codex

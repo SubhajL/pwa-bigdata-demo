@@ -109,6 +109,18 @@ services:
       # Blank => discover the artifact baked into the image at /srv/artifacts/model.pkl.
       MODEL_PATH: ""
       SCORING_ENABLED: "1"       # S6: the periodic scoring pass (item 3.3)
+      # PR-6: the REAL curated dataset. The image does NOT bake `data/` in (the build
+      # context is the repo root, but data/ is deliberately excluded), so it is
+      # bind-mounted exactly as `seed` and `simulator` already do.
+      CURATED_PATH: /srv/data/curated/water_sold_by_branch.csv
+      # Browser origins allowed to call the API cross-origin. In the normal setup the
+      # Vite proxy makes the browser same-origin and this never fires; it covers a judge
+      # calling the API directly on :8000.
+      CORS_ORIGINS: "http://localhost:${WEB_PORT:-5173},http://127.0.0.1:${WEB_PORT:-5173}"
+    volumes:
+      # The `api` service had NO volumes before PR-6, which is why the curated read API
+      # could not have worked however it was written.
+      - ../data/curated:/srv/data/curated:ro
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
@@ -161,10 +173,21 @@ services:
     build: ../web
     command: pnpm dev --host 0.0.0.0 --port 5173
     environment:
-      VITE_API_BASE: http://localhost:8000
+      # EMPTY on purpose. The app issues RELATIVE /api and /ws requests and the Vite dev
+      # proxy forwards them, so the browser is same-origin. The old absolute value sent
+      # the twin WebSocket to Vite instead of FastAPI, and nothing could connect.
+      VITE_API_BASE: ""
+      # Where that proxy forwards to. `api` resolves only inside this compose network;
+      # a host-side `pnpm dev` falls back to http://localhost:8000 (see web/vite.config.ts).
+      VITE_PROXY_TARGET: http://api:8000
     ports:
       - "${WEB_PORT:-5173}:5173"
-    profiles: ["ui"]            # started on demand (S4+); not required for S0 health
+    depends_on:
+      api:
+        condition: service_healthy
+    # NO profile as of PR-6. Behind `profiles: ["ui"]` a plain `docker compose up` brought
+    # up no frontend at all, so the proxy this PR adds would never have been exercised —
+    # and from PR-7 the UI is where the scored items are actually demonstrated.
 
 volumes:
   tsdb-data:

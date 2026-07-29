@@ -487,3 +487,143 @@ end-to-end — 5 migrations applied, backfill exit 0 with 1800 rows, worklist ra
 28.3→96.0 monotonic with wear, PTTF ramping 0→505h, RCA naming vibration/bearing-temp/power,
 feedback persisted with Thai text intact, `/docs` serving the verdict enum, conservation
 `holds: true`.
+
+---
+
+## PR-6 — frontend foundation from Stitch (2026-07-29) [Mode A, **SL-3**]
+
+Phase B of `docs/PR-PLAN.md`. Plan: `docs/DREP-PR6-foundation.md`.
+Delegate: DeepSeek V4 Pro via `pi`, session `pr6-frontend-foundation`. **1 fix round.**
+
+### Stop line: SL-3, chosen by the Q0–Q3 tree, not by feel
+
+- **Q0** — no security/auth boundary, no tenant isolation, **no migration** (the curated
+  API reads CSV; 001–005 exist and this PR adds none), no secrets, spec not fuzzy, every
+  slice has an oracle → delegation permitted.
+- **Q1 — YES.** `web/src/styles/globals.css` is the one genuinely hard piece: the hex→OKLCH
+  conversion plus `light-dark()` *is* the token contract, and a silent error there
+  invalidates the CVD-validated palette `design/tokens.map.md` certifies. Everything else
+  is plumbing. → **SL-3.**
+- Q2 was also YES (new routes, new exports, ≥2 files, crosses Python↔TS). Q1∧Q2 is still
+  SL-3, which strictly includes the SL-2 seams.
+- **Adaptation:** S1 SL-2 needed 3 rounds → S3/S5/S6 ran SL-3. This was additionally the
+  delegate's first frontend slice. Torn → take the higher. It paid: **one** fix round.
+
+**Claude authored:** `globals.css`, all 10 acceptance-test files, every type signature, all
+wiring (nav registry, route tree, router, FastAPI middleware + router include, lifespan
+store), and all infrastructure (compose, `.dockerignore`, `env.sample`, Dockerfile).
+**Delegate authored:** the implementation bodies only — components, `lib/format.ts`,
+`api/client.ts`, `mocks/extremes.ts`, `api/app/curated.py`, `api/app/routes/curated.py`.
+
+### RED / mutation evidence
+
+The token contract was written before its test (seams-first), so it has **no RED signal and
+is mutation-verified instead** — 6 mutations, each killed by its named test: a 5% lightness
+shift on `--primary`, deleting `color-scheme: light dark`, deleting `animation-duration`
+from the reduced-motion block, dropping a font import, deleting `--anim-medium`, and adding
+a dark media block that overrides a token.
+
+**One mutation SURVIVED on the first pass and that is the point of doing it:** deleting
+`color-scheme: light dark` left the suite green, because the assertion scanned the raw file
+and matched the *explanatory comment* above the declaration. Every structural CSS assertion
+now runs on comment-stripped text and requires the declaration inside `:root`. Prose is not
+code. The same bug class had already bitten the `prefers-color-scheme` check.
+
+The RED proof for T1 also caught a **broken harness rather than a real RED**: under vitest's
+jsdom environment `import.meta.url` is not a `file:` URL, so `fileURLToPath` threw before a
+single assertion ran — indistinguishable from a failing implementation. Paths now derive
+from `process.cwd()`, with a `T0` guard that fails loudly if the cwd ever moves.
+
+CORS middleware was also written before its test → mutation-verified (3 mutations: remove
+the middleware, drop `Server-Timing` from `expose_headers`, switch to a wildcard).
+
+### The test-isolation regression I introduced, found by running the gates properly
+
+`test_cors.py` must re-import `app.main` (middleware attaches to the module-level singleton
+at import time, so setting the env afterwards cannot reconfigure it). The first version
+popped `app.main`/`app.config` from `sys.modules` and **never put them back**. Result:
+`test_latency.py::test_latest_query_uses_the_index_and_does_not_scan` failed in the full
+suite while passing in isolation — bisected by running the suite with each new file removed
+(without them: 152 pass; with either alone: pass; with both: fail). Now a fixture snapshots
+and restores `sys.modules`. Cross-file interference is indistinguishable from a real
+regression, which is exactly why this was worth chasing rather than retrying.
+
+### QCHECK — Tier 1 Claude, Tier 2 Codex `gpt-5.6-sol` @ xhigh. Verdict: **BLOCK**, 6 HIGH.
+
+All fixed. The ones worth remembering:
+
+- **`text-white` was an accessibility defect, not a style nit.** The delegate used Tailwind's
+  built-in white on `--primary` and `--simulated` because **the token table had no *on-*
+  colours**. Correct in light mode; in dark mode `--primary` is a light blue and
+  `--simulated` a light violet, giving **2.55:1** and **2.72:1** — below AA, and invisible
+  to anyone testing only in light mode. Fixed at the source: `--on-primary` and
+  `--on-simulated` added to `design/tokens.map.md` (with measured ratios and a footnote
+  explaining why they exist) and to `globals.css`. `tokens.test.ts` now fails on ANY
+  built-in Tailwind palette utility, which literal-scanning could never see.
+- **Motion tokens existed but were never used.** `transition-colors` silently takes
+  Tailwind's 150ms default and `animate-pulse` is 2s. T12 only proved the tokens were
+  *defined*. It now requires every file using a `transition*` utility to name an `--anim-*`
+  token, and bans `duration-\d+` and `animate-*`.
+- **`test_wildcard_is_never_configured` was vacuous.** It configured the *safe* origin and
+  asserted `*` was absent — true by construction, and it would have passed while
+  `CORS_ORIGINS=*` produced `allow_origins=["*"]` alongside `allow_credentials=True`.
+  `Settings.cors_origin_list` now raises on `*`, and the test configures the dangerous value
+  and asserts the refusal.
+- **`getJson` called `fetch(path)`, bypassing `apiUrl`** — so `VITE_API_BASE` was honoured
+  by the helper and ignored by every actual request. Took **three attempts to pin**: the
+  obvious URL assertion is vacuous because with the shipped empty base `apiUrl(p) === p`,
+  and a leading-slash-validation assertion also survived mutation once `apiUrl` moved out
+  of the `try`. Only re-importing the module over a mocked config makes the broken and
+  correct versions differ. Mutation-verified.
+- **The `SIMULATED` badge was decorating every unbuilt placeholder.** That was *my* spec
+  error, not the delegate's. A placeholder shows no values, so the marker's accessible claim
+  ("this value is synthetic") is simply false — and three of those routes will later show
+  REAL curated data. Removed; the `StatusChip kind="nodata"` stays, because it is true.
+- Non-finite CSV volumes (`nan`/`inf`) flowed into roll-ups and would 500 on JSON
+  serialisation → `math.isfinite` guard. `_normalise_month` accepted `2025-02-30` → real
+  calendar validation. Equal-volume ranks depended on CSV row order → `branch_code`
+  tie-break. `asChild` dropped everything but `className` → Radix `Slot`.
+
+**Claude tail patch (attributed honestly):** `getJson` now resolves `apiUrl(path)` *outside*
+its `try`, so a malformed path surfaces as `TypeError` instead of being re-reported as
+`ApiError(0, …)` — "the network failed" sends a debugger to the wrong place.
+
+### Environment defect worth knowing about
+
+Under Node 26 + jsdom, undici's `Request` brand-checks `signal` and rejects jsdom's
+`AbortSignal`. react-router 7 builds a `Request` on **every** navigation, so
+`router.navigate()` threw internally and silently did nothing — verified with a minimal
+two-route probe, so it is not specific to our routes. `web/src/test-setup.ts` carries a
+narrowly-scoped `Request` shim with the reasoning. A browser has one realm and is unaffected;
+no production code was changed to accommodate it.
+
+### Deferred, with owners (NOT silently dropped)
+
+- **Everything needing a real rendering engine** — computed contrast, focus-ring visibility,
+  60-char truncation, skeleton geometry, FOUT, glyph coverage, and a live
+  browser→proxy→FastAPI→WebSocket check. jsdom cannot see any of it. **Owner: PR-17**, which
+  already owns the Playwright pass. Declared as a Non-Goal in DREP §1, and `a11y.test.tsx` /
+  T18 state their limits in the file rather than implying more coverage than they have.
+- **Shared `pwa_curated` package.** `api/app/curated.py` re-implements the CSV read because
+  `api/app` and `simulator/app` are both top-level `app` packages and must never share an
+  interpreter. Mitigated by a **drift test** that obtains the roster out-of-process and
+  asserts both derive the same 234 branch codes. Owner: whichever PR next needs curated data
+  server-side.
+- **Declared seams with no runtime consumer yet:** `wsUrl`, `Num`, `Skeleton`, `formatMonthTh`,
+  `mocks/extremes.ts`, `navItemByPath`, `CardFooter`. Tier 2 accepted this disposition. PR-7
+  consumes `wsUrl` and `Num` on day one; `Num` in particular ships now *with its test* so no
+  later screen can render a numeral without `tabular-nums`.
+- CI still does not exist. `--admin` bypasses nothing today, but that is luck, not design.
+
+### Verified by Claude, under Claude's own hand
+
+`web`: **148 tests, 3 consecutive runs**, typecheck 0, eslint 0, `vite build` succeeds (fonts
+bundled locally — no CDN). `api`: **193 tests, 3 consecutive runs** (baseline was 152), ruff
+clean, mypy `--strict` clean across 39 files. Diff audit clean every round: acceptance tests
+byte-identical, no Claude-owned seam touched, no fabricated/mocked/randomised data, no test
+weakened or skipped, no out-of-tree writes.
+
+Ground truth for the curated tests was **measured, not remembered**: 9 126 rows, 234 distinct
+`branch_code`, 235 labels (one branch renamed), 39 months, regions 1–10, and a 2025-12 total
+of **120 999 833.55 m³** — which is the figure printed on the Stitch mockup, so it is an
+external anchor rather than a self-consistency check.

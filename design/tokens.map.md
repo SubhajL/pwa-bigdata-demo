@@ -21,8 +21,12 @@ Stitch returned its own `designMd` (`PWA Analytics Precision`) which *rewrote* s
 | `--status-critical` | `#B42318` | `#F2545B` | **validated** | |
 | `--status-nodata` | `#8A97A3` | `#6B7A88` | authored | |
 | `--simulated` | `#7C3AED` | `#A78BFA` | authored | **reserved — nothing else may use violet** |
+| `--on-primary` | `#FFFFFF` | `#101A24` | **validated** ² | text/icons ON `--primary` |
+| `--on-simulated` | `#FFFFFF` | `#101A24` | **validated** ² | text ON the SIMULATED pill |
 
 Light status palette passed all six checks: worst adjacent ΔE **17.4** normal vision, all ≥ 3:1 on canvas.
+
+² **Added 2026-07-29 (PR-6).** The original table had no *on-* colours, so the first implementation reached for Tailwind's `text-white` on both `--primary` and `--simulated`. That is correct in light mode and **broken in dark**: dark `--primary` is `#5EA8E6` and dark `--simulated` is `#A78BFA`, giving white contrast ratios of **2.55:1** and **2.72:1** — far below AA, and invisible to anyone testing only in light mode. Measured ratios for the tokens above: on-primary 6.30:1 light / 6.88:1 dark; on-simulated 5.70:1 light / 6.46:1 dark.
 
 ¹ **Documented exception.** Dark-mode warning `#CFA218` sits at L 0.734, above the validator's dark lightness ceiling (~0.70). Every alternative that dropped it into the band collapsed CVD separation against critical below the ΔE 8 floor — an intrinsic property of chromatic yellow, not a tuning failure. It ships **only** because status always carries an icon and a Thai text label, which is the required secondary encoding. If status ever renders as a bare colour swatch, this token is invalid.
 

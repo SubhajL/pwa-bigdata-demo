@@ -19,12 +19,15 @@ import logging
 from collections.abc import AsyncIterator
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from psycopg_pool import ConnectionPool
 
 from .config import Settings, get_settings
+from .curated import load_curated
 from .db import get_pool
 from .ingest import PipelineStatus, RawMessage
 from .model import get_bundle
+from .routes import curated as curated_routes
 from .routes import dlq as dlq_routes
 from .routes import pipeline as pipeline_routes
 from .routes import predict as predict_routes
@@ -111,6 +114,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.twin_hub = None
     app.state.bundle = None
     app.state.scoring_deps = None
+    app.state.curated = None
+
+    # The REAL dataset, parsed once. Built HERE rather than at import time on purpose:
+    # `/healthz` is deliberately dependency-free (see below), and an import-time read
+    # would let a missing bind-mount take down liveness along with it. A failure leaves
+    # `app.state.curated` None, which the curated routes report as 503 while every other
+    # route carries on.
+    if settings.curated_path:
+        try:
+            app.state.curated = load_curated(settings.curated_path)
+            logger.info("curated dataset loaded from %s", settings.curated_path)
+        except (OSError, ValueError):
+            logger.exception(
+                "curated dataset unreadable at %s; /api/curated will return 503",
+                settings.curated_path,
+            )
+    else:
+        logger.info("CURATED_PATH unset; /api/curated will return 503")
 
     pool = _open_pool(settings.database_url)
     app.state.pool = pool
@@ -171,11 +192,36 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="PWA Big Data Demo API", version="0.1.0", lifespan=lifespan)
+
+# Until PR-6 there was NO CORS middleware, so a browser could not call this API at all
+# (SESSION-HANDOFF §3). In the normal setup the Vite dev proxy makes the browser
+# same-origin and this never fires; it covers the direct cross-origin cases — a judge
+# calling the API from another port, or a built `dist/` served elsewhere.
+#
+# Origins are an explicit allow-list read from CORS_ORIGINS. Never "*": a wildcard with
+# credentials is rejected by browsers regardless, and reflecting an arbitrary origin is
+# not a thing to ship.
+#
+# Added at import time because middleware is attached to this module-level singleton;
+# mutating CORS_ORIGINS after import cannot reconfigure it, which is why `test_cors.py`
+# builds a fresh app instead.
+_cors_settings = get_settings()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_settings.cors_origin_list,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+    # So a browser can read the item-1.3 latency evidence the telemetry routes emit.
+    expose_headers=["Server-Timing"],
+)
+
 app.include_router(pipeline_routes.router)
 app.include_router(telemetry_routes.router)
 app.include_router(dlq_routes.router)
 app.include_router(twin_routes.router)
 app.include_router(predict_routes.router)
+app.include_router(curated_routes.router)
 
 
 @app.get("/healthz")
