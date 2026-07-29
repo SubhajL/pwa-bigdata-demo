@@ -1,0 +1,32 @@
+[project]
+name = "pwa-demo-ml"
+version = "0.1.0"
+requires-python = ">=3.13"
+
+# Gate config mirrors api/ and simulator/ so `ml/` is held to the same bar.
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: trains a model; deselect with -m 'not slow'.",
+]
+filterwarnings = [
+    # numpy 2.2.1 on Apple's Accelerate BLAS emits these from *every* matmul, including
+    # `np.random.normal(...) @ np.random.normal(...)` on clean data — verified directly.
+    # They are an artifact of that BLAS backend, not of our inputs. Suppressed so the gate
+    # output stays readable; the property they would otherwise hint at is asserted
+    # positively instead, by test_every_prediction_is_finite.
+    "ignore:(divide by zero|overflow|invalid value) encountered in matmul:RuntimeWarning",
+]

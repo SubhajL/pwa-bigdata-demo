@@ -1,0 +1,5 @@
+# PWA demo ML — RUNTIME deps only, pinned. Python 3.13.
+# Kept minimal: this is what an inference image would need to install.
+scikit-learn==1.6.0
+numpy==2.2.1
+joblib==1.4.2

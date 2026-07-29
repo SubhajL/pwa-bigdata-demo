@@ -1,0 +1,132 @@
+{
+  "model_version": "pwa-health-pttf-v1",
+  "simulated": true,
+  "feature_names": [
+    "pressure_bar_mean",
+    "pressure_bar_slope",
+    "pressure_bar_max",
+    "flow_m3h_mean",
+    "flow_m3h_slope",
+    "flow_m3h_max",
+    "power_kw_mean",
+    "power_kw_slope",
+    "power_kw_max",
+    "vibration_mean",
+    "vibration_slope",
+    "vibration_max",
+    "bearing_temp_c_mean",
+    "bearing_temp_c_slope",
+    "bearing_temp_c_max"
+  ],
+  "data_sha256": "b847664d4ab11777141dccd8b413b770d94f8b58ecb3840ee2ede0aea76add1c",
+  "created_from": {
+    "n_train_lifecycles": 28,
+    "n_validation_lifecycles": 10
+  },
+  "pipelines": {
+    "health": {
+      "estimator_class": "Ridge",
+      "hyperparameters": {
+        "alpha": 1.0,
+        "copy_X": true,
+        "fit_intercept": true,
+        "max_iter": null,
+        "positive": false,
+        "random_state": 42,
+        "solver": "auto",
+        "tol": 0.0001
+      },
+      "target": "latent health at the end of the window",
+      "units": "0-100",
+      "preprocessing": [
+        "StandardScaler"
+      ]
+    },
+    "pttf": {
+      "estimator_class": "Ridge",
+      "hyperparameters": {
+        "alpha": 1.0,
+        "copy_X": true,
+        "fit_intercept": true,
+        "max_iter": null,
+        "positive": false,
+        "random_state": 42,
+        "solver": "auto",
+        "tol": 0.0001
+      },
+      "target": "hours from window end until latent health first crosses the failure threshold",
+      "units": "hours",
+      "preprocessing": [
+        "StandardScaler"
+      ]
+    }
+  },
+  "censoring": {
+    "policy": "PTTF is fitted only on uncensored windows; a censored run's failure time is a lower bound, not an observation",
+    "censored_fraction": 0.4638549205556942,
+    "total_training_windows": 12021,
+    "censored_training_windows": 5576,
+    "pttf_training_windows": 6445
+  },
+  "splits": {
+    "train": [
+      "lc-20260729-001",
+      "lc-20260729-002",
+      "lc-20260729-003",
+      "lc-20260729-004",
+      "lc-20260729-005",
+      "lc-20260729-006",
+      "lc-20260729-007",
+      "lc-20260729-008",
+      "lc-20260729-010",
+      "lc-20260729-011",
+      "lc-20260729-012",
+      "lc-20260729-013",
+      "lc-20260729-014",
+      "lc-20260729-015",
+      "lc-20260729-016",
+      "lc-20260729-017",
+      "lc-20260729-018",
+      "lc-20260729-019",
+      "lc-20260729-020",
+      "lc-20260729-021",
+      "lc-20260729-022",
+      "lc-20260729-023",
+      "lc-20260729-024",
+      "lc-20260729-025",
+      "lc-20260729-026",
+      "lc-20260729-027",
+      "lc-20260729-028",
+      "lc-20260729-029"
+    ],
+    "validation": [
+      "lc-20260729-030",
+      "lc-20260729-031",
+      "lc-20260729-032",
+      "lc-20260729-033",
+      "lc-20260729-034",
+      "lc-20260729-035",
+      "lc-20260729-036",
+      "lc-20260729-037",
+      "lc-20260729-038",
+      "lc-20260729-039"
+    ],
+    "reserved_for_demo": [
+      "lc-20260729-000",
+      "lc-20260729-009"
+    ]
+  },
+  "metrics": {
+    "health": {
+      "model_mae": 0.15061125412268433,
+      "baseline_mae": 17.024557299125583
+    },
+    "pttf": {
+      "model_mae": 30.920488661186734,
+      "baseline_mae": 102.02054239697907
+    }
+  },
+  "limitations": [
+    "Trained entirely on synthetic data generated from a linear wear model; real-world pump degradation patterns may differ materially in both rate and signal response shape."
+  ]
+}
