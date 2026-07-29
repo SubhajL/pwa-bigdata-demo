@@ -53,6 +53,44 @@ class Settings(BaseSettings):
     #: Seconds between scoring passes. Item 3.3 budgets 30s for the whole chain.
     scoring_interval_s: float = 10.0
 
+    #: Path to the REAL curated dataset. Blank means "not mounted", which degrades the
+    #: /api/curated routes to 503 and leaves every other route untouched — the API image
+    #: does not bake `data/` in, compose bind-mounts it (see infra/docker-compose.yml).
+    curated_path: str = ""
+
+    #: Comma-separated browser origins allowed to call this API cross-origin.
+    #:
+    #: Defaulted, not required, so every existing `Settings()` call site keeps working.
+    #: The default is the Vite dev server. In the normal setup the browser talks to the
+    #: API THROUGH the Vite proxy and is therefore same-origin, so CORS is the belt to
+    #: that braces: it covers a judge hitting the API directly, or a built `dist/` served
+    #: from another origin.
+    #:
+    #: Deliberately never "*": `allow_credentials` with a wildcard is rejected by every
+    #: browser anyway, and reflecting an arbitrary origin is not something to ship.
+    cors_origins: str = "http://localhost:5173"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        """`cors_origins` split and cleaned. Empty entries are dropped, not sent as "".
+
+        A `*` entry is REJECTED here rather than passed through. The middleware is
+        configured with `allow_credentials=True`; combined with a wildcard that is both
+        rejected outright by every browser and, if a browser did honour it, a
+        credentialed request from any origin on the internet. Refusing at configuration
+        time turns a silent misconfiguration into a startup failure.
+
+        Raises:
+            ValueError: if any entry is `*`.
+        """
+        origins = [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+        if "*" in origins:
+            raise ValueError(
+                "CORS_ORIGINS must not contain '*': the API sends credentials, and a "
+                "wildcard origin with credentials is invalid. List the exact origins."
+            )
+        return origins
+
     @field_validator("api_run_id")
     @classmethod
     def _fill_run_id(cls, value: str) -> str:

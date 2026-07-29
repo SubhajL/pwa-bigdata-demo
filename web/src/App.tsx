@@ -1,10 +1,9 @@
-import { APP_CONFIG } from "./config/app.config";
+import { RouterProvider } from "react-router-dom";
+
+import { createAppRouter } from "@/routes/router";
+
+const router = createAppRouter();
 
 export function App(): JSX.Element {
-  return (
-    <main>
-      <h1>{APP_CONFIG.brand}</h1>
-      <p>PWA Big Data Demo — scaffold (S0)</p>
-    </main>
-  );
+  return <RouterProvider router={router} />;
 }

@@ -178,3 +178,83 @@ class RcaResponse(BaseModel):
     contributions: list[SignalContribution] = Field(default_factory=list)
     simulated: bool = True
     detail: str | None = None
+
+
+# ── curated real data (PR-6, ผนวก ๕/๖ role dashboards) ─────────────────────────────────
+#
+# These are the ONLY values in this API that are not simulated. They come from
+# `data/curated/water_sold_by_branch.csv` — real PWA water-sold figures for 234 branches
+# over 39 months — so none of them carries a `simulated` flag, and none of them may be
+# rendered with a SIMULATED marker either. Mislabelling real data is the mirror image of
+# the honesty rule and is just as wrong.
+#
+# Identity note: a branch IS its `branch_code`. Labels are not stable — code 5551014 is
+# recorded as บ้านนาสาร in earlier months and เวียงสระ in later ones, which is why the
+# dataset has 234 codes but 235 labels. See `simulator/app/roster.py`.
+
+
+class RegionTotal(BaseModel):
+    """One region's share of a month's national total."""
+
+    region: int
+    water_sold_m3: float
+    #: COUNT DISTINCT branch_code reporting in that month.
+    branch_count: int
+
+
+class RegionRollup(BaseModel):
+    """National roll-up for one month (ผนวก ๕ §2.1)."""
+
+    month: str = Field(..., description="YYYY-MM")
+    total_m3: float
+    #: COUNT DISTINCT branch_code nationally. 234 for a complete month, never 235.
+    branch_count: int
+    #: Sorted by water_sold_m3 descending.
+    regions: list[RegionTotal] = Field(default_factory=list)
+
+
+class BranchRow(BaseModel):
+    """One row of a region's branch league table (ผนวก ๖ §2.1)."""
+
+    #: 1-based over the DEFAULT sort (volume desc) and STORED, so a client-side re-sort
+    #: does not renumber it — rank means "rank by volume", not "row position"
+    #: (design/INTERACTIONS.md §Sorting).
+    rank: int
+    branch_code: str
+    #: The label recorded in THIS month's row. A per-month table shows the name in use
+    #: that month; no cross-month reconciliation is applied here.
+    branch: str
+    province: str
+    region: int
+    water_sold_m3: float
+    #: None — never 0.0 — when the comparison month has no row for this branch_code, or
+    #: when its baseline is 0 (a zero baseline has no defined percentage change).
+    mom_pct: float | None = None
+    yoy_pct: float | None = None
+
+
+class SeriesPoint(BaseModel):
+    """One month of one branch's history."""
+
+    month: str
+    water_sold_m3: float
+
+
+class BranchSeries(BaseModel):
+    """A single branch's monthly history (ผนวก ๗)."""
+
+    branch_code: str
+    #: Resolved AS-OF the latest month present for this code, so the header describes the
+    #: current network rather than a union of history.
+    branch: str
+    province: str
+    region: int
+    #: Ascending by month. Gaps are NOT filled — a missing month is absent, not zero.
+    points: list[SeriesPoint] = Field(default_factory=list)
+
+
+class CuratedMonths(BaseModel):
+    """Months available in the curated dataset."""
+
+    months: list[str] = Field(default_factory=list)
+    count: int
