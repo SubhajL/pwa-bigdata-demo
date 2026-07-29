@@ -19,13 +19,17 @@ import logging
 from collections.abc import AsyncIterator
 
 from fastapi import FastAPI
+from psycopg_pool import ConnectionPool
 
 from .config import Settings, get_settings
 from .db import get_pool
 from .ingest import PipelineStatus, RawMessage
+from .routes import dlq as dlq_routes
 from .routes import pipeline as pipeline_routes
 from .routes import telemetry as telemetry_routes
+from .routes import twin as twin_routes
 from .service import IngestDeps, load_roster, run_consumer, start_subscriber, stop_subscriber
+from .ws import TwinHub
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +70,27 @@ class IngestBridge:
         self._loop.call_soon_threadsafe(self._enqueue, message)
 
 
+def _open_pool(dsn: str) -> ConnectionPool | None:
+    """Open the database independently of MQTT, or return None if it is unreachable.
+
+    Retrieval (scored item 1.3) and the DLQ browser must work with the subscriber switched
+    off — tying the pool to MQTT_ENABLED made every read return 503 in exactly the
+    configuration the latency demo runs in.
+    """
+    pool = get_pool(dsn)
+    try:
+        with pool.connection(timeout=2.0):
+            pass  # prove reachability now, so routes 503 cleanly instead of hanging
+    except Exception:
+        # Broad on purpose — any connection failure must leave the API serving /healthz
+        # rather than crashing at startup — but never silent: without this line an
+        # unreachable database looks identical to a healthy one with no data.
+        logger.exception("database unreachable at startup; read endpoints will return 503")
+        pool.close()
+        return None
+    return pool
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = get_settings()
@@ -80,13 +105,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.run_id = settings.api_run_id
     app.state.pool = None
     app.state.mqtt_client = None
+    app.state.twin_hub = None
+
+    pool = _open_pool(settings.database_url)
+    app.state.pool = pool
 
     consumer: asyncio.Task[None] | None = None
-    if settings.mqtt_enabled:
-        pool = get_pool(settings.database_url)
-        app.state.pool = pool
+    if settings.mqtt_enabled and pool is not None:
+        hub = TwinHub()
+        app.state.twin_hub = hub
         deps = IngestDeps(
-            pool=pool, roster=load_roster(pool), status=status, run_id=settings.api_run_id
+            pool=pool, roster=load_roster(pool), status=status,
+            run_id=settings.api_run_id, twin_hub=hub,
         )
         consumer = asyncio.create_task(run_consumer(deps, bridge.queue))
         deps.client = start_subscriber(deps, settings, bridge.submit)
@@ -101,6 +131,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             consumer.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await consumer
+        if app.state.twin_hub is not None:
+            app.state.twin_hub.close()
         if app.state.pool is not None:
             app.state.pool.close()
 
@@ -108,6 +140,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="PWA Big Data Demo API", version="0.1.0", lifespan=lifespan)
 app.include_router(pipeline_routes.router)
 app.include_router(telemetry_routes.router)
+app.include_router(dlq_routes.router)
+app.include_router(twin_routes.router)
 
 
 @app.get("/healthz")

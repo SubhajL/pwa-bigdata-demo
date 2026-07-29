@@ -195,3 +195,79 @@ Mutation evidence: reverting the QoS-1 re-subscription fails the reconnect test;
 Verified by Claude: ruff clean; mypy --strict clean (18 files); pytest 60 passed x3
   consecutive; simulator's 42 still green; AST check shows no function over 50 lines and
   no `# type: ignore` anywhere in either service.
+
+## 2026-07-29 — PR-3 (slice S3): retrieval latency, DLQ browse, twin WebSocket [Mode A]
+
+Stop line: **SL-3**, chosen via Q0-Q3 (Q0 no; Q1 YES — the fan-out hub is the one genuinely
+concurrency-sensitive part, the endpoints are plumbing). Also consistent with the adaptation
+rule: PR-1 needed 3 delegate rounds, so this comparable slice moved up one level from SL-2.
+
+Delegate authored: `latest_reading`, `recent_dead_letters`, `telemetry_latest`,
+  `list_dead_letters` (1 round). Claude authored: `app/ws.py`, `routes/twin.py`, the
+  `Disposition` refactor in `service.py`, main.py wiring, `003_read_paths.sql`, and every test.
+
+**Scope crossing, recorded honestly:** the delegate also edited `api/app/main.py`, which was
+  on its do-not-touch list. The change was correct — the pool was created only inside
+  `if settings.mqtt_enabled`, so every read returned 503 in exactly the configuration the
+  latency demo runs in. Claude reviewed, adopted and hardened it (added the logging the
+  original swallowed) rather than reverting a real fix.
+
+QCHECK: Tier 1 = Claude (g2-check on the working tree). Tier 2 = Codex gpt-5.6-sol xhigh —
+  mandatory (delegate-authored code). DeepSeek excluded as the implementer. Tier 2 returned
+  0 CRITICAL, 4 HIGH, 5 MEDIUM, 3 LOW. Full report: docs/codex-review-s3.md.
+
+  Found by Claude BEFORE Tier 2 (from the plan review) and fixed:
+  - broadcast fired for DLQ'd and redelivered messages, because dispose_message returned a
+    bare bool meaning "stored" — a rejected bad asset stores just as successfully as a good
+    reading. Replaced with a Disposition enum; only ACCEPTED broadcasts, ack stays
+    independent of the WS so a socket problem cannot become a redelivery storm.
+  - every database-backed handler was `async def` while calling synchronous psycopg, holding
+    the single worker's event loop (which also runs ingest and fan-out) for each query.
+
+  FIXED from Tier 2 — HIGH:
+  - #1 an idle client that disconnected leaked its subscriber forever: a disconnect arrives
+    as an ASGI *receive*, and a send-only handler never performs one. Now a sender task plus
+    a receive-watcher, whichever finishes first cancels the other. Mutation-verified: the
+    old send-only loop fails the new live test.
+  - #2 broadcast is O(N) on the loop with no admission limit; leaked or hostile clients make
+    every MQTT message O(N) (measured ~43ms at 100k subscribers). Admission now capped.
+  - #3 DLQ offset paging unbounded — deep offsets still walk every preceding index entry.
+    Offset ceiling added; cursor pagination deferred (offset only drifts under concurrent
+    insert, acceptable for a demo browser) and recorded.
+  - #4 the latency test is a steady-state local preflight, not judge-facing evidence. Said so
+    explicitly in the test docstring instead of implying otherwise, and it now asserts the
+    BODY too — a fast endpoint returning the wrong asset used to pass.
+
+  FIXED from Tier 2 — MEDIUM/LOW:
+  - #5 the hub kept the newest N frames globally, so 64 updates for other assets could evict
+    a pending `P-1: critical` and the twin would show it healthy forever. Frames now coalesce
+    per asset, and eviction prefers routine `normal` frames over notable ones.
+  - #6 `latest_reading` had no total ordering; added a message_id tie-breaker.
+  - #7 a valid non-object payload (`[1,2,3]`, a scalar, `null`) was stored as a bare JSON
+    value and the reader invented a shape for it, making a genuine {"value": ...} payload
+    indistinguishable from a wrapped scalar. The envelope is now decided at write time.
+  - #8 the EXPLAIN assertions accepted any plan containing "Index" (including a bitmap scan
+    plus sort) and any plan without "Sort" (including a seq scan). Now parses FORMAT JSON and
+    asserts an ordered Index Scan on the expected index by name.
+  - #9 the ACK matrix was untested — "ack only ACCEPTED" and "omit the final ack after retry"
+    both survived. Two tests added.
+  - #11 `max_queue=0` silently meant UNBOUNDED (asyncio.Queue semantics); now rejected.
+  - #12 the DLQ route test only proved a 503; a broken 200 body stayed green. Real shape test
+    added against a configured database.
+  - #10 (LOW) NULL provenance mapped to "" — left as is, recorded; changing Reading.message_id
+    to `str | None` ripples through S2's contract for no demo benefit.
+
+**Flakiness:** the 3x loop caught a real 1-in-7 intermittent failure. It did not reproduce in
+  12 further runs, and the specific test was not captured. Two live WS tests asserted after a
+  fixed `sleep()`, which is the classic shape of exactly that flake, so both were rewritten to
+  poll with a deadline. Recorded rather than dismissed: if it recurs, the fixed-sleep theory
+  is wrong and the reconnect/latency timing tests are the next suspects.
+
+Verified by Claude: ruff clean; mypy --strict clean (26 files); pytest 100 passed;
+  no function over 50 lines; no `# type: ignore`. Live against the full Compose stack:
+  5 WS frames received (event_version=1), /latest mean 1.1ms (budget 500ms) with
+  Server-Timing db;dur=0.13, /api/dlq returning real rejects, migrate applied 001+002+003.
+
+Deferred with owners: browser-measured latency + cold-start evidence -> S-D/PR-17; CORS and
+  the Vite dev proxy -> PR-6; chunk-exclusion for latest-ever -> S-D; keyset pagination -> when
+  the DLQ browser gains filters.

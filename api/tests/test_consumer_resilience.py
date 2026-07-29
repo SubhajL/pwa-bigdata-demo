@@ -24,7 +24,7 @@ from psycopg_pool import ConnectionPool
 from app import service
 from app.db import Accepted, Rejected, conservation_counts
 from app.ingest import PipelineStatus, RawMessage
-from app.service import IngestDeps, consume_once, load_roster, run_consumer
+from app.service import Disposition, IngestDeps, consume_once, load_roster, run_consumer
 
 pytestmark = pytest.mark.integration
 
@@ -174,7 +174,7 @@ async def test_a_failure_escaping_the_db_layer_still_does_not_stall_the_loop(
     real = service.dispose_message
     calls = {"n": 0}
 
-    def exploding(d: IngestDeps, raw: RawMessage) -> bool:
+    def exploding(d: IngestDeps, raw: RawMessage) -> Disposition:
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("escaped the db layer entirely")

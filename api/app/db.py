@@ -19,7 +19,7 @@ from typing import Any
 import psycopg
 from psycopg_pool import ConnectionPool
 
-from .models import Reading
+from .models import DeadLetter, Reading
 
 LEDGER_INSERT = """
 INSERT INTO ingress_ledger (message_id, run_id, outcome, raw)
@@ -129,9 +129,15 @@ def encode_raw(payload: bytes | dict[str, Any]) -> str:
 
     try:
         text = payload.decode("utf-8")
-        json.loads(text)
+        parsed = json.loads(text)
     except (UnicodeDecodeError, json.JSONDecodeError):
         return _wrap(payload, "_undecodable")
+    if not isinstance(parsed, dict):
+        # A valid but non-object payload (`[1,2,3]`, `"x"`, `null`) would otherwise be
+        # stored as a bare JSON array/scalar, and the reader would have to invent a shape
+        # for it — making a real `{"value": ...}` payload indistinguishable from a wrapped
+        # scalar. Decide the envelope here, once, where the ambiguity can still be avoided.
+        return json.dumps({"_raw_json": parsed, "_non_object": True})
     return text if _is_storable(text) else _wrap(payload, "_unstorable")
 
 
@@ -202,6 +208,78 @@ def query_range(
         )
         for row in rows
     ]
+
+
+LATEST_QUERY = """
+SELECT message_id, run_id, ts, asset_id, signal, value
+FROM telemetry
+WHERE asset_id = %s
+ORDER BY ts DESC, message_id DESC
+LIMIT 1
+"""
+
+DLQ_QUERY = """
+SELECT message_id, run_id, asset_id, reason, raw
+FROM dead_letter
+ORDER BY created_at DESC, id DESC
+LIMIT %s OFFSET %s
+"""
+
+#: Hard ceiling on a DLQ page, so one careless request cannot scan the whole table.
+MAX_DLQ_LIMIT = 500
+
+#: Deep offsets are not free even with the index: PostgreSQL still walks every preceding
+#: entry. Paging past this is a sign the caller wants a filter, not another page.
+MAX_DLQ_OFFSET = 5_000
+
+
+def latest_reading(pool: ConnectionPool, asset_id: str) -> Reading | None:
+    """The most recent reading for ONE asset, or None when it has never reported.
+
+    Must be served by the existing `(asset_id, ts DESC)` index — scored item 1.3 is a
+    latency budget, and a sequential scan over a hypertable is precisely how it is lost.
+    """
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(LATEST_QUERY, (asset_id,))
+        row = cur.fetchone()
+    if row is None:
+        return None
+    return Reading(
+        message_id=row[0] or "",
+        run_id=row[1] or "",
+        ts=row[2],
+        asset_id=row[3],
+        signal=row[4],
+        value=row[5],
+    )
+
+
+def recent_dead_letters(
+    pool: ConnectionPool, *, limit: int = 50, offset: int = 0
+) -> list[DeadLetter]:
+    """Most recent dead letters first, for the pipeline monitor.
+
+    `limit` is clamped to `MAX_DLQ_LIMIT`; `offset` pages through older rows.
+    """
+    limit = max(1, min(limit, MAX_DLQ_LIMIT))
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(DLQ_QUERY, (limit, offset))
+        rows = cur.fetchall()
+    result: list[DeadLetter] = []
+    for row in rows:
+        raw_val = row[4]
+        if not isinstance(raw_val, dict):
+            raw_val = {"value": raw_val}
+        result.append(
+            DeadLetter(
+                message_id=row[0],
+                run_id=row[1],
+                asset_id=row[2],
+                reason=row[3],
+                raw=raw_val,
+            )
+        )
+    return result
 
 
 def conservation_totals(pool: ConnectionPool) -> dict[str, int]:
