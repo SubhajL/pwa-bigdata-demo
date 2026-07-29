@@ -24,10 +24,13 @@ from psycopg_pool import ConnectionPool
 from .config import Settings, get_settings
 from .db import get_pool
 from .ingest import PipelineStatus, RawMessage
+from .model import get_bundle
 from .routes import dlq as dlq_routes
 from .routes import pipeline as pipeline_routes
+from .routes import predict as predict_routes
 from .routes import telemetry as telemetry_routes
 from .routes import twin as twin_routes
+from .scoring import ScoringDeps, run_scoring_loop, stop_scoring
 from .service import IngestDeps, load_roster, run_consumer, start_subscriber, stop_subscriber
 from .ws import TwinHub
 
@@ -106,9 +109,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.pool = None
     app.state.mqtt_client = None
     app.state.twin_hub = None
+    app.state.bundle = None
+    app.state.scoring_deps = None
 
     pool = _open_pool(settings.database_url)
     app.state.pool = pool
+
+    # Loaded once per process: unpickling a scikit-learn pipeline is not free, and both the
+    # scoring cycle and the on-demand routes need it. None here disables the predictive
+    # endpoints without touching the pipeline ones — topic ๑ must not depend on topic ๓.
+    bundle = get_bundle(settings.model_path)
+    app.state.bundle = bundle
 
     consumer: asyncio.Task[None] | None = None
     if settings.mqtt_enabled and pool is not None:
@@ -123,10 +134,32 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.mqtt_client = deps.client
         logger.info("ingest started with %d known assets", len(deps.roster))
 
+    # Scoring is deliberately NOT gated on MQTT: health is computed from a window of STORED
+    # telemetry, so a brief broker outage — the state the item-1.2 reconnect demo creates —
+    # does not stop the predictive half.
+    #
+    # It is not immune to a long one, and that is intentional: `features.MAX_STALENESS_S`
+    # refuses a window whose newest reading is over five minutes old, so a fleet that has
+    # genuinely gone dark reports `nodata` rather than serving a confident score from stale
+    # history. The publisher therefore has to keep running for the demo to keep scoring,
+    # which is why compose no longer hides the simulator behind a profile.
+    scorer: asyncio.Task[None] | None = None
+    if settings.scoring_enabled and pool is not None and bundle is not None:
+        scoring_deps = ScoringDeps(
+            pool=pool,
+            bundle=bundle,
+            twin_hub=app.state.twin_hub,
+            interval_s=settings.scoring_interval_s,
+        )
+        app.state.scoring_deps = scoring_deps
+        scorer = asyncio.create_task(run_scoring_loop(scoring_deps))
+        logger.info("scoring loop started (model %s)", bundle.model_version)
+
     try:
         yield
     finally:
         await stop_subscriber(app.state.mqtt_client)
+        await stop_scoring(scorer)
         if consumer is not None:
             consumer.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -142,6 +175,7 @@ app.include_router(pipeline_routes.router)
 app.include_router(telemetry_routes.router)
 app.include_router(dlq_routes.router)
 app.include_router(twin_routes.router)
+app.include_router(predict_routes.router)
 
 
 @app.get("/healthz")

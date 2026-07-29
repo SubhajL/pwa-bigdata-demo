@@ -15,6 +15,10 @@ strict = true
 warn_unused_ignores = true
 disallow_untyped_defs = true
 ignore_missing_imports = true
+# `pwa_ml` is a sibling package, copied into the image at /srv/pwa_ml (see api/Dockerfile).
+# Without this, `ignore_missing_imports` would silently type every model call as `Any` and
+# strict mode would be checking nothing across the most important boundary in the slice.
+mypy_path = "../ml"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
