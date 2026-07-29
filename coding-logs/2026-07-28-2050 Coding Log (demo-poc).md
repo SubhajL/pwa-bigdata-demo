@@ -346,3 +346,144 @@ Environment note: numpy 2.2.1 on Apple Accelerate emits divide-by-zero/overflow/
 
 Verified by Claude: ruff clean; mypy --strict clean (13 files); ml 48 passed x3; api 100 and
   simulator 42 still green; no function over 50 lines; no `# type: ignore`.
+
+---
+
+## PR-5 / slice S6 — predictive-maintenance API (2026-07-29)
+
+Scored items 3.3 (twin health event ≤30s), 3.4 (Swagger feedback loop, 200 + persisted),
+3.5 (risk-ranked worklist), plus the `GET /api/rca/{asset_id}` surface for 3.6. 15 points.
+Also lands the two things PR-4 deferred to this slice by name: serving the model from the
+API image, and the live feature-window contract.
+
+**Stop line: SL-3, by user override.** The Q0–Q3 tree would have said SL-3 anyway (Q1: one
+genuinely hard part — the live feature window — surrounded by plumbing), and the adaptation
+rule agreed: DREP §8 planned S6 at SL-2, but the previous delegated slice needed fix rounds
+and silently changed RNG ordering, so this one moved up one.
+
+Authorship, honestly:
+  - **Claude**: migration 004 + 005, `api/app/features.py` (the hard function),
+    `health_store.py`, `model.py`, `models.py` additions, `main.py` wiring, `config.py`,
+    `api/app/__init__.py`, `scripts/backfill_history.py`, Dockerfile, compose, requirements,
+    and EVERY test.
+  - **DeepSeek V4 Pro via `pi`** (one round, no fix rounds): the bodies of `score_all` and
+    `run_scoring_loop`, and the four route bodies. Nothing else. Diff audit clean on the
+    first pass — spec byte-identical, scope respected, no fabricated data, no test weakened.
+  - **Claude took over the delegate's files afterwards** rather than running a fix round.
+    Reason: the review findings in `scoring.py` traced to MY contract, not to the delegate's
+    execution — the brief explicitly told it to broadcast from inside the blocking function,
+    which is the cross-thread defect below. Handing back my own design error to be re-fixed
+    would have been dishonest attribution and a wasted round.
+
+Delegate cost: one `pi` run, ~30 lines of report. Claude spent the tokens on the contract,
+the tests, and four review rounds — which is where they belonged.
+
+### The window contract (the decision this slice existed to make)
+
+The model wants ≥16 contiguous HOURLY rows carrying all five signals. The hypertable holds
+one row per reading, each with ONE signal, and the simulator cycles 238 devices at 5 Hz — so
+a device is heard from every ~48s and needs ~4 minutes to report five signals once, 16 hours
+to fill a window. Live-only scoring cannot produce a number during a demo.
+
+User chose: **backfilled hourly history + a live newest bucket**. Real clock hours, no
+compressed time unit, so `pttf_hours` means what the model card says. `scripts/backfill_history.py`
+lays 30 hourly buckets per pump ending at `now`; live readings land in the newest one.
+
+### Review — g2-qcheck, 4 rounds, 2 reviewers
+
+Tier 1 `/code-review` was unavailable, so per the skill's own fallback an independent Opus
+agent ran it. Tier 2 was Codex `gpt-5.6-sol` at `xhigh` (model read from config, smoke-tested
+before use). Tier 2 was MANDATORY here on four separate triggers: domain math, a core API
+contract, a schema migration, and delegated implementation.
+
+Round 1 — Tier 1 returned **BLOCK**: 2 CRITICAL, 4 HIGH. Tier 2 independently returned 5 HIGH.
+Both were real. De-duplicated and dispositioned:
+
+  - **CRITICAL, fixed** — `backfill_history.py`'s `sys.path` guard was inverted for the
+    container layout. Python puts the SCRIPT'S directory on `sys.path` for a path
+    invocation, never the cwd, so `/srv` was unreachable exactly where `pwa_ml` sat.
+    `docker compose up` died there, and `api` waits on `backfill` completing — the entire
+    demo stack was dead on a clean bring-up. Reproduced in the real image before fixing.
+  - **CRITICAL, fixed** — the predictive half went dark ~6 minutes after boot: one-shot
+    backfill + `MAX_STALENESS_S=300` + `simulator` behind `profiles: ["sim"]`, so a plain
+    `docker compose up` had no publisher. Profile removed; the comment in `main.py` claiming
+    immunity to a stopped broker was false and is corrected.
+  - **HIGH, fixed** (Tier 2) — `score_all` called `TwinHub.broadcast` from inside an
+    `asyncio.to_thread` worker. `broadcast` ends in `asyncio.Event.set()`, which is not
+    thread-safe: the frame is queued while an already-awaiting socket task stays asleep,
+    missing exactly the 30s deadline item 3.3 is scored on. MY contract specified this.
+    `score_all` now returns `ScoringResult(rows, events)`; `run_scoring_loop` broadcasts on
+    the loop. The 3.3 test was rewritten to drive `run_scoring_loop` with a subscriber
+    already awaiting and asyncio debug on — the old shape could not see the bug.
+  - **HIGH, fixed** (both tiers) — LOCF admitted a confident 24-hour window from six
+    readings. `_too_thin` adds bucket-coverage and per-signal-age guards.
+  - **HIGH, fixed** — `scoreable_assets` shared `MAX_WORKLIST=200`, silently truncating a
+    238-device fleet. Separate `MAX_SCOREABLE`, LIMIT in SQL, truncation logged.
+  - **HIGH, fixed** (both tiers) — no per-asset containment: one poison device discarded the
+    whole cycle, and deterministic ordering meant the next cycle died at the same device.
+    `_score_one` contains failures per asset.
+  - **HIGH, fixed** — two guards were untested with SURVIVING MUTANTS (the `nodata` skip and
+    the recovery-transition edge, the only path that clears a red symbol off the twin).
+  - **HIGH, fixed** — banding thresholds were copied literals while the docstring claimed
+    they came from the model module. Now imported, with a test pinning the equality.
+
+Rounds 2–4 — conservation took THREE attempts, each caught by Tier 2:
+  1. delete by `run_id LIKE 'backfill-%'` — orphaned a dead letter's ledger row.
+  2. delete by `message_id LIKE` — same hole, since `message_id` is wire-supplied for
+     rejected messages too.
+  3. `+ AND outcome = 'TELEMETRY'` — still wrong: an ACCEPTED message can forge the prefix,
+     and the two DELETEs are separate statements under READ COMMITTED, so a message
+     committing between them loses its ledger row while its telemetry row survives.
+  Fixed properly by **`005_row_provenance.sql`**: a `source` column defaulting to `'MQTT'`,
+  set by the writer and never by the payload. Wire messages cannot claim it however named.
+  Lesson recorded: I twice fixed the symptom shown to me instead of the property that
+  mattered — reasoning about who would plausibly send an id, not about what the schema
+  guarantees.
+
+Tier 1's re-review **stalled twice** on the agent watchdog and was NOT recorded as a pass.
+Substituted per the ladder with a third Codex pass plus Claude's own verification. Flagged
+here so the substitution is visible rather than implied.
+
+### Flakiness — the 3× check earned its keep
+
+`test_latency.py::test_latest_query_uses_the_index_and_does_not_scan` (guards scored item
+1.3) failed ~1 run in 4. Attribution was MEASURED, not assumed: `main` is 4/4 clean, so the
+regression was this slice's. Two wrong theories first — stale statistics (an `ANALYZE`-in-test
+"fix" made it fail 4/4, disproving it) and fixture pollution (real, fixed, but not the cause;
+collection is alphabetical so backfill rows do not exist yet when `test_latency` runs).
+Root cause: S6's scoring loop starts whenever a pool and artifact exist — `MQTT_ENABLED=0`
+does not disable it — so a `GROUP BY ... HAVING count(DISTINCT date_trunc('hour', ts))` over
+24h of the hypertable ran every 10s against the database the latency test measures. The
+harness now sets `SCORING_ENABLED=0`. A second failure mode surfaced underneath it: the
+`purge_backfill` helper did not mirror the script's delete predicate, breaking conservation
+for a whole session and surfacing three files away in `test_pipeline_e2e`. Both fixed;
+5/5 clean afterwards.
+
+Non-vacuity: `features.build_window` was written seams-first, so it has NO RED signal and is
+**mutation-verified instead** — 5 mutations, each killed by its named test. The density guard
+needed a 6th test: the first one passed with the coverage branch deleted because the
+per-signal-age branch was killing it, so the two branches are now pinned independently. The
+`__init__.py` bootstrap fix and the provenance fix are also mutation-verified. Recorded here
+because a green suite is not evidence for code that never had a RED.
+
+### Deferred, with owners (NOT silently dropped)
+
+  - **MEDIUM — scoring load vs the item-1.3 latency budget.** `scoreable_assets` is an
+    unindexable GROUP BY over 24h of a hypertable running every 10s, and it grows with the
+    table (~432k rows/day at 5 Hz). Tier 2's verdict, asked directly: legitimate to isolate
+    in the harness, "need not block this PR; must close before final item-1.3/demo
+    acceptance." → **S-D (demo director)**: a scoring-enabled, full-Compose latency gate.
+  - **LOW** — no `.dockerignore` now that the build context is the repo root
+    (`api/.mypy_cache` alone is 58 MB); `health_asset_scored_idx` duplicates the existing
+    PRIMARY KEY; `model.py:27` comment says "four parents" where the code is three.
+
+### Verified by Claude, under Claude's own hand
+
+ruff clean; mypy --strict clean (35 files); **152 tests passed, 5 consecutive runs, no
+flakiness** (baseline was 100); every new export has a non-test import AND a runtime call
+site; the image builds and `get_bundle("")` loads the artifact INSIDE the container
+(`Ridge`, `pwa-health-pttf-v1`); and a clean-volume `docker compose up` was driven
+end-to-end — 5 migrations applied, backfill exit 0 with 1800 rows, worklist ranked
+28.3→96.0 monotonic with wear, PTTF ramping 0→505h, RCA naming vibration/bearing-temp/power,
+feedback persisted with Thai text intact, `/docs` serving the verdict enum, conservation
+`holds: true`.

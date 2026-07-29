@@ -64,6 +64,14 @@ def live_api(timescale_dsn: str) -> Iterator[str]:
         **os.environ,
         "DATABASE_URL": timescale_dsn,
         "MQTT_ENABLED": "0",          # this test is about retrieval, not ingest
+        # ...nor about scoring. Slice S6 added a scheduled scoring cycle that starts
+        # whenever a pool and a model artifact exist — MQTT_ENABLED=0 does not disable it.
+        # Its `scoreable_assets` query is a `GROUP BY ... HAVING count(DISTINCT
+        # date_trunc('hour', ts))` over 24h of the hypertable, running every 10s against
+        # the very database this test is measuring. Left on, it made the plan assertion
+        # below fail roughly 1 run in 4 (measured; `main` is 4/4 clean), which is the worst
+        # way for a scored item's guard to behave. A harness must isolate what it measures.
+        "SCORING_ENABLED": "0",
         "API_RUN_ID": f"latency-{uuid.uuid4().hex[:8]}",
     }
     proc = subprocess.Popen(

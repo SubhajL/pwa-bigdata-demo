@@ -44,7 +44,11 @@ services:
   # without this anyone who ran the stack before 002 existed would silently run new
   # code against the old schema.
   migrate:
-    build: ../api
+    # Context is the repo root so the image can carry `ml/` (slice S6). All three services
+    # that share this image must declare it identically, or compose builds two images.
+    build: &api-build
+      context: ..
+      dockerfile: api/Dockerfile
     command: python /srv/scripts/migrate.py
     environment:
       DATABASE_URL: postgresql://pwa:pwa@timescaledb:5432/pwa
@@ -61,7 +65,7 @@ services:
   # table is empty, so every message would be dead-lettered while the broker and the
   # API both reported healthy. Ordering is enforced, not documented.
   seed:
-    build: ../api
+    build: *api-build
     command: python /srv/scripts/seed_db.py
     environment:
       DATABASE_URL: postgresql://pwa:pwa@timescaledb:5432/pwa
@@ -75,8 +79,26 @@ services:
         condition: service_completed_successfully
     restart: "no"
 
+  # ── one-shot: give the model something to look at ───────────────────────────
+  # The model scores a 24-hour window; the simulator publishes one signal per device
+  # every ~48s, so a live-only stack would take 16 hours to produce its first score and
+  # the predictive demo would show `nodata` throughout. This lays down hourly history
+  # for a handful of pumps, ending now, so the newest bucket is the only live one.
+  # Every backfilled reading is SIMULATED and carries a `backfill-` run_id.
+  backfill:
+    build: *api-build
+    command: python /srv/scripts/backfill_history.py
+    environment:
+      DATABASE_URL: postgresql://pwa:pwa@timescaledb:5432/pwa
+    volumes:
+      - ../scripts:/srv/scripts:ro
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    restart: "no"
+
   api:
-    build: ../api
+    build: *api-build
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
     environment:
       DATABASE_URL: postgresql://pwa:pwa@timescaledb:5432/pwa
@@ -84,10 +106,13 @@ services:
       MQTT_PORT: "1883"
       MQTT_ENABLED: "1"          # S2: the subscriber is live
       API_RUN_ID: ""             # blank => a fresh id per start (see Settings)
+      # Blank => discover the artifact baked into the image at /srv/artifacts/model.pkl.
+      MODEL_PATH: ""
+      SCORING_ENABLED: "1"       # S6: the periodic scoring pass (item 3.3)
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
-      seed:
+      backfill:
         condition: service_completed_successfully
       mosquitto:
         condition: service_healthy
@@ -125,7 +150,12 @@ services:
         condition: service_healthy
       seed:
         condition: service_completed_successfully
-    profiles: ["sim"]            # started on demand (S1); not required for S0 health
+    # NO profile: the publisher now starts with the stack. S1 kept it on-demand because
+    # nothing depended on live traffic, but S6's window contract does — `backfill` is a
+    # ONE-SHOT whose newest reading ages out after `features.MAX_STALENESS_S` (300s).
+    # Behind a profile, `docker compose up` gave a stack that scored for five minutes and
+    # then reported `nodata` for every device for the rest of the session, which is most of
+    # topic ๓ silently unscoreable.
 
   web:
     build: ../web

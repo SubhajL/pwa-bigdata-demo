@@ -17,27 +17,35 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+ML_ROOT = REPO_ROOT / "ml"
 TIMESCALE_IMAGE = "timescale/timescaledb:2.17.2-pg16"
 MOSQUITTO_IMAGE = "eclipse-mosquitto:2.0.20"
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
-    """Expose `scripts/` only.
+    """Expose `scripts/` and `ml/`.
 
     `simulator/` is deliberately NOT added: it also contains a top-level package named
     `app`, so putting it on this process's path would shadow `api/app` (or be shadowed by
     it) depending on import order. The two services never share an interpreter in
     production either — they are separate containers. Anything needing the simulator's
     roster shells out instead (see `simulator_roster`).
+
+    `ml/` IS added, because slice S6 makes the API import `pwa_ml` directly. The image
+    copies that package to `/srv/pwa_ml`, next to `app/`; this reproduces that layout for
+    the test interpreter. It carries no `app` package, so it cannot shadow anything.
     """
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
+    if str(ML_ROOT) not in sys.path:
+        sys.path.insert(0, str(ML_ROOT))
 
 
 def _free_port() -> int:
@@ -167,3 +175,76 @@ def mosquitto() -> Iterator[int]:
         yield port
     finally:
         subprocess.run(["docker", "kill", cid], capture_output=True, timeout=120)
+
+
+# ── slice S6: model serving and backfilled history ────────────────────────────────────
+
+
+@pytest.fixture(scope="session")
+def model_artifact() -> pathlib.Path:
+    """The canonical `ml/artifacts/model.pkl`, built by the documented command if absent.
+
+    Deliberately NOT a `tmp_path` model. Scored item 3.1 is about the artifact that ships,
+    and slice S6's whole claim is that the API serves *that* file through
+    `app.model.get_bundle`. Training into a temporary directory would test a model the
+    demo never loads — the exact failure `ml/tests/test_shipped_artifact.py` was written
+    to prevent. Building it here rather than skipping keeps the S6 acceptance tests
+    meaningful on a fresh clone; it takes about two seconds.
+    """
+    artifact = ML_ROOT / "artifacts" / "model.pkl"
+    if not artifact.is_file():
+        subprocess.run(
+            [sys.executable, "-m", "pwa_ml"],
+            cwd=ML_ROOT, capture_output=True, text=True, check=True, timeout=600,
+        )
+    if not artifact.is_file():  # pragma: no cover - the build above either works or raises
+        raise RuntimeError(f"{artifact} still absent after `python -m pwa_ml`")
+    return artifact
+
+
+def purge_backfill(pool: ConnectionPool) -> None:
+    """Remove every backfilled row and refresh statistics.
+
+    The database is SESSION-scoped while this fixture is function-scoped, so without this
+    a single S6 test would permanently reshape the table for every test that ran after it.
+    It did: `test_latency.py::test_latest_query_uses_the_index_and_does_not_scan` guards
+    scored item 1.3 by asserting the latest-reading query is an index SEEK, and the extra
+    1800 rows flipped the planner onto the hypertable's time-only index — intermittently at
+    first, which is the worst possible way for it to fail.
+
+    Same `message_id LIKE` predicate the script itself uses, so it can only ever match rows
+    the backfill wrote.
+    """
+    with pool.connection() as conn, conn.cursor() as cur:
+        # Must mirror `backfill_history` EXACTLY. An earlier version deleted ledger rows
+        # by message-id prefix without matching the script's filter, and that asymmetry
+        # broke conservation for the whole pytest session — surfacing three files away in
+        # `test_pipeline_e2e`'s live status assertion rather than here.
+        cur.execute("DELETE FROM telemetry WHERE source = 'BACKFILL'")
+        cur.execute("DELETE FROM ingress_ledger WHERE source = 'BACKFILL'")
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("ANALYZE telemetry")
+
+
+@pytest.fixture
+def backfilled(pool: ConnectionPool) -> Iterator[list[str]]:
+    """Hourly history for a handful of pumps, ending now.
+
+    Uses the SAME script compose runs, so the window the tests score is the window the
+    demo scores. Returns the backfilled asset ids, worst-health LAST — `backfill_history`
+    spreads wear rates in ascending order, so the final id is the most degraded and is the
+    device a correct worklist must rank first.
+
+    Cleans up after itself; see `purge_backfill`.
+    """
+    from scripts.backfill_history import DEFAULT_ASSETS, PUMP_QUERY, backfill
+
+    with pool.connection() as conn:
+        backfill(conn, now=datetime.now(tz=UTC), assets=DEFAULT_ASSETS)
+        with conn.cursor() as cur:
+            cur.execute(PUMP_QUERY, (DEFAULT_ASSETS,))
+            assets = [row[0] for row in cur.fetchall()]
+    try:
+        yield assets
+    finally:
+        purge_backfill(pool)

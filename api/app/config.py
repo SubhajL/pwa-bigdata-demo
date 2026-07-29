@@ -42,6 +42,17 @@ class Settings(BaseSettings):
 
     api_run_id: str = ""
 
+    #: Explicit path to the serialized model. Blank means "discover it" — see
+    #: `app.model.resolve_model_path`, which prefers the copy baked into the image.
+    model_path: str = ""
+
+    #: The periodic scoring pass behind scored item 3.3. Switchable so a test, or a demo
+    #: rehearsal that only exercises topic ๑, can run the API without it.
+    scoring_enabled: bool = True
+
+    #: Seconds between scoring passes. Item 3.3 budgets 30s for the whole chain.
+    scoring_interval_s: float = 10.0
+
     @field_validator("api_run_id")
     @classmethod
     def _fill_run_id(cls, value: str) -> str:
