@@ -97,7 +97,7 @@ ML (S5/S6) · any UI · demo director (S-D) · historical backfill · auth · CI
 | F1f | `simulator/requirements.txt` | MODIFY (append) | pin pydantic + dev deps | **Claude** |
 | F1g | `scripts/seed_db.py` | MODIFY (`_branch_index`,`_devices` L25–47) | delegate to F1a | **Claude** (seed path) |
 | F1h | `infra/docker-compose.yml` | MODIFY (`simulator:` L57–67) | mount `../data/curated` ro; `RUN_ID`, `FAULT_MODE` env | **Claude** |
-| F1i | `contracts/telemetry.envelope.v1.schema.json` | CREATE | the shared wire contract | **Claude** |
+| F1i | `contracts/telemetry-envelope.v1.schema.json` | CREATE | the shared wire contract | **Claude** |
 | F1j | `simulator/tests/{__init__,conftest,test_roster,test_publish,test_contract}.py` | CREATE | acceptance tests | **Claude** |
 
 ### S2 (PR-2) — `feat/s2-ingest-dlq-tsdb`
@@ -119,10 +119,19 @@ ML (S5/S6) · any UI · demo director (S-D) · historical backfill · auth · CI
 
 ```
 FN-S1-1  load_devices(csv_path: Path = CURATED) -> list[Device]                        # F1a
-  Post:   exactly 239 Devices for the committed CSV; 235 `PWA-{i:03d}-P1` pumps where i
-          indexes sorted(branch -> (region, province)), then P-1,P-2,M-3,V-9.
-          Deterministic order; asset_ids unique.
-  Errors: FileNotFoundError; ValueError on a missing column.
+  REVISED during S1 review (Codex Tier-2 finding 3) — the original label-keyed model was wrong.
+  Post:   exactly 238 Devices for the committed CSV; 234 `PWA-{branch_code}-P1` pumps
+          ordered by branch_code, then P-1,P-2,M-3,V-9. asset_ids unique.
+  Identity: a branch is its `branch_code`, NOT its Thai label. Code 5551014 is recorded
+          as บ้านนาสาร in early months and เวียงสระ later, so label-keying yields 235
+          branches for a dataset that has 234 in every month — a phantom device for a
+          branch that no longer exists, published as real PWA geography. Geography is
+          resolved as-of the latest month for that code. Position-derived ids would
+          renumber on any insertion, and seed_db's ON CONFLICT DO NOTHING would leave
+          stale geography on a reused id with the FK still green.
+  Errors: FileNotFoundError; ValueError on a missing column, blank identity field,
+          region outside 1..10, conflicting same-month geography, or an absent
+          สมุทรสาคร demo branch (it must NOT fabricate geography — CLAUDE.md honesty rule).
   Invariant: PURE — no network, no DB. Byte-stable for a given input file.
 
 FN-S1-2  make_signal(dev, tick: int, mode: FaultMode) -> tuple[Signal, float]           # F1d
@@ -297,7 +306,7 @@ simulator's independent published count.
 
 ## §10 Do-Not-Touch (delegate)
 - Every file under `simulator/tests/**` and `api/tests/**` (the contract).
-- `contracts/telemetry.envelope.v1.schema.json`.
+- `contracts/telemetry-envelope.v1.schema.json`.
 - `infra/db/**` (schema + migrations are Claude-only), `scripts/seed_db.py`, `scripts/migrate.py`.
 - `infra/docker-compose.yml`, `infra/mosquitto/mosquitto.conf`.
 - `data/curated/**`, `data/raw/**`, `design/**`.

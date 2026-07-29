@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/SubhajL/pwa-bigdata-demo/contracts/telemetry-envelope.v1.schema.json",
+  "title": "PWA telemetry envelope v1",
+  "description": "The MQTT wire contract between the simulator (producer, slice S1) and the API ingest path (consumer, slice S2). Published to pwa/telemetry/{asset_id} at QoS 1. This file is the single source of truth for the wire format; both sides' test suites validate against it, so the format cannot drift silently.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["message_id", "run_id", "ts", "asset_id", "signal", "value"],
+  "properties": {
+    "message_id": {
+      "type": "string",
+      "description": "Logical event identity: uuid5(NS, run_id|asset_id|tick). Stable within a run so a QoS-1 redelivery is idempotent; unique across runs because run_id is fresh per producer process. This is NOT the MQTT delivery identity (that is the broker's mid).",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Identifies one producer process lifetime. Scopes the conservation invariant so concurrent or historical runs never contaminate a test assertion.",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Observation time, RFC3339 with an explicit UTC offset. Timezone-naive values are invalid and are dead-lettered by the consumer."
+    },
+    "asset_id": {
+      "type": "string",
+      "description": "Device identity. MUST exist in the seeded device roster; an unknown asset_id is the R1.5 dead-letter case and is injected deliberately by FaultMode.BAD_ASSET.",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "signal": {
+      "type": "string",
+      "enum": ["pressure_bar", "flow_m3h", "power_kw", "vibration", "bearing_temp_c"],
+      "description": "Measured quantity. Mirrors the Signal literal in api/app/models.py; the two are pinned together by the consumer's contract test.",
+      "$comment": "Keep in sync with api/app/models.py::Signal."
+    },
+    "value": {
+      "type": "number",
+      "description": "The measurement. MUST be finite - NaN and Infinity are not valid JSON numbers and are dead-lettered."
+    }
+  }
+}
