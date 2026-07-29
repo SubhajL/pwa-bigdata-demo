@@ -271,3 +271,78 @@ Verified by Claude: ruff clean; mypy --strict clean (26 files); pytest 100 passe
 Deferred with owners: browser-measured latency + cold-start evidence -> S-D/PR-17; CORS and
   the Vite dev proxy -> PR-6; chunk-exclusion for latest-ever -> S-D; keyset pagination -> when
   the DLQ browser gains filters.
+
+## 2026-07-29 — PR-4 (slice S5): predictive-maintenance model [Mode A, SL-3]
+
+Stop line SL-3 via Q0-Q3 (Q1: the domain math — censoring semantics, local attribution,
+leakage-free splits — is the judgment core; lifecycle generation and feature extraction are
+plumbing). Delegate wrote lifecycle.py, features.py, train.py (2 rounds: implementation,
+then a pure length refactor). Claude wrote datasets.py, predict.py, the censoring model, the
+dataset generator and every test.
+
+Delegate note: the first `pi` invocation timed out (this session had repeated transient
+network failures — a git fetch and a pip install failed the same way). A single retry
+succeeded; the Phase 0e fallback ladder was not needed.
+
+Measured, not asserted: health MAE 0.150 vs DummyRegressor 17.025; PTTF MAE 31.2h vs
+102.0h; 99.5 health-point separation between the two HELD-OUT demo lifecycles.
+
+QCHECK: Tier 1 = Claude. Tier 2 = Codex gpt-5.6-sol xhigh (mandatory: delegate-authored +
+domain/business semantics). Returned 1 CRITICAL, 5 HIGH, 2 MEDIUM. Full report:
+docs/codex-review-s5.md. Note it reviewed a snapshot mid-edit and says so.
+
+  Found by Claude first, via mutation testing:
+  - training PTTF on censored windows as EXACT targets passed all 13 tests, because the
+    output flag is computed at inference and says nothing about fitting. The card now
+    records total/censored/pttf training window counts, which makes the policy checkable.
+  - the committed demo CSVs had drifted from the generator. The delegate's "pure length
+    refactor" changed the RNG draw order — power_kw matched but four other signals did not
+    — so it was NOT behaviour-preserving despite the brief requiring it. No test pinned
+    exact values, which is why the new drift test earns its place. Codex independently
+    reported the same drift (two witnesses).
+  - that drift test initially took 199s, because pytest renders a diff over 45KB of CSV on
+    failure. Now compares digests: 0.07s.
+
+  FIXED from Tier 2:
+  - CRITICAL #1 the slice shipped NO artifact — train() had no entry point and everything
+    was built inside pytest's tmpdir, so a fresh clone had nothing for load_bundle() to
+    open while test_the_artifact_loads... still passed. Added `python -m pwa_ml`, committed
+    the model card, and added tests that load the CANONICAL ml/artifacts/model.pkl.
+  - HIGH #3 `pttf_censored` was not censoring. Censoring is a property of an OBSERVATION;
+    nothing at inference knows whether a device's failure will be observed. Renamed to
+    `pttf_out_of_range` and documented as an extrapolation warning. Training's censoring
+    handling was already correct. Also removed a comment of mine claiming a linear model
+    cannot extrapolate past its fitted target range — that is simply false.
+  - HIGH #4 the whole anti-theatre suite read SELF-REPORTED card fields, so a fitter that
+    trained on validation + the reserved demo pair while writing honest split ids passed
+    everything. Confirmed by mutation. Comparing MAE cannot catch it either (a leaked model
+    reports its own lower number). Now: perturb ONLY the held-out lifecycles, retrain, and
+    require the fitted coefficients to be unchanged. The mutation now fails.
+  - HIGH #5 the data hash covered only lifecycle id, hour and latent health — Codex shifted
+    a training vibration value and the digest did not move. Now hashes every observable.
+  - HIGH #6 RCA compared a CLIPPED actual health against UNCLIPPED counterfactuals, so at
+    the boundary (raw 120 vs 110, both displayed 100) it reported a +10 contribution that
+    did not exist. Now raw against raw.
+  - MEDIUM #7 the RCA baseline was the mean of ALL training windows, i.e. a moderately worn
+    machine. Now the mean of healthy windows — a nominal device.
+  - MEDIUM #8 inference accepted any 8 rows; training used 24-hour contiguous windows.
+    Minimum raised to 16 and reordered/gapped windows are rejected as `nodata`.
+  - HIGH #2 (stale datasets) was the drift Claude had already found and fixed.
+
+  NOT fixed, recorded with reasons:
+  - Serving the model from the API image. The API container cannot see ml/ and does not
+    install its dependencies. Packaging is DECIDED here (pwa_ml; artifact + card from
+    train()); the image/compose wiring is PR-5's, the slice that adds the inference routes.
+  - The live feature-window contract (resampling, freshness, per-asset isolation from a 5Hz
+    stream) belongs with S6's score_all, the first code to build windows from live data.
+  - Codex's remaining point on #7 — that model attribution is not causal root cause — is
+    accepted as true and is a limitation of the technique, not a defect. The card's
+    limitations section says so.
+
+Environment note: numpy 2.2.1 on Apple Accelerate emits divide-by-zero/overflow/invalid
+  RuntimeWarnings from EVERY matmul, reproduced with random data. Filtered in
+  ml/pyproject.toml with that reasoning recorded; the property they might have hinted at is
+  asserted positively by test_every_prediction_is_finite.
+
+Verified by Claude: ruff clean; mypy --strict clean (13 files); ml 48 passed x3; api 100 and
+  simulator 42 still green; no function over 50 lines; no `# type: ignore`.

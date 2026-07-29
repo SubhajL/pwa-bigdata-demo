@@ -22,7 +22,7 @@ Vercel/serverless target.
 
 ## Gate commands
 
-| Gate | Backend (`api/`, `simulator/`) | Frontend (`web/`) |
+| Gate | Backend (`api/`, `simulator/`, `ml/`) | Frontend (`web/`) |
 |---|---|---|
 | test | `pytest` | `pnpm test` (vitest) |
 | lint | `ruff check .` | `pnpm lint` (eslint) |
