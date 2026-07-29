@@ -17,6 +17,9 @@ joblib==1.4.2
 # dev / gates
 pytest==8.3.4
 pytest-asyncio==0.25.0
+# A non-terminating graph traversal must FAIL the suite, not hang CI. Used by
+# test_topology.py's cyclic-topology guard (scored item 2.4).
+pytest-timeout==2.3.1
 httpx==0.28.1
 ruff==0.8.6
 mypy==1.14.1
