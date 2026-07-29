@@ -17,6 +17,8 @@ import contextlib
 import itertools
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from enum import Enum
 from typing import Any, Protocol
 
 import paho.mqtt.client as mqtt
@@ -33,6 +35,8 @@ from .ingest import (
     decode,
     validate,
 )
+from .models import TwinEvent
+from .ws import TwinHub
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +46,7 @@ _UNDECODABLE_SEQ = itertools.count(1)
 #: Re-exported so tests can substitute it; the consumer calls this module-level name.
 __all__ = [
     "Acker", "IngestDeps", "consume_once", "disposition", "dispose_message",
-    "load_roster", "run_consumer", "start_subscriber", "stop_subscriber",
+    "Disposition", "load_roster", "run_consumer", "start_subscriber", "stop_subscriber",
 ]
 
 
@@ -70,6 +74,8 @@ class IngestDeps:
     #: undecodable payloads — see `_classify`.
     run_id: str = "unset"
     client: Acker | None = None
+    #: Optional fan-out to connected twin clients. Never awaited from this path.
+    twin_hub: TwinHub | None = None
 
 
 def _classify(
@@ -111,26 +117,76 @@ def _classify(
     return reading.message_id, reading.run_id, payload, Accepted(reading)
 
 
-def dispose_message(deps: IngestDeps, raw: RawMessage) -> bool:
-    """Classify and persist one message. Returns True when it may be acknowledged.
+class Disposition(Enum):
+    """What actually happened to one delivery.
 
-    A False return means the database could not be reached, so the message stays
-    unacknowledged and the broker will redeliver it.
+    A boolean cannot express this. "Stored successfully" is true for a dead-lettered bad
+    asset and for a QoS-1 redelivery just as much as for a new reading — so a boolean
+    return made it impossible to decide whether the twin should be told anything, and the
+    naive wiring announced rejects and replays as fresh news.
     """
+
+    ACCEPTED = "accepted"     # new, valid reading -> tell the twin
+    DUPLICATE = "duplicate"   # redelivery; already dispositioned -> ack, say nothing
+    REJECTED = "rejected"     # dead-lettered -> ack, say nothing
+    FAILED = "failed"         # could not store -> do NOT ack; retry
+
+    @property
+    def ackable(self) -> bool:
+        return self is not Disposition.FAILED
+
+
+def dispose_message(deps: IngestDeps, raw: RawMessage) -> Disposition:
+    """Classify and persist one message, reporting which of the four outcomes occurred."""
     try:
         # Inside the try: classification itself must not be able to escape and leave the
         # message unacked forever (an OverflowError here used to do exactly that).
         message_id, run_id, stored, outcome = _classify(raw, deps.roster, deps.run_id)
         with deps.pool.connection() as conn:
-            disposition(
+            newly = disposition(
                 conn, message_id=message_id, run_id=run_id, raw=stored, outcome=outcome
             )
     except Exception:
         # Broad by necessity: any database-side failure must leave the message unacked
         # rather than kill the consumer. It is logged, never swallowed silently.
         logger.exception("disposition failed for mid=%s; will retry", raw.mid)
-        return False
-    return True
+        return Disposition.FAILED
+    if not newly:
+        return Disposition.DUPLICATE
+    return Disposition.ACCEPTED if isinstance(outcome, Accepted) else Disposition.REJECTED
+
+
+def _emit_twin_event(deps: IngestDeps, raw: RawMessage) -> None:
+    """Publish a live status frame for an accepted reading.
+
+    Deliberately fire-and-forget: `TwinHub.broadcast` is synchronous and total, so a
+    backgrounded browser tab cannot apply back-pressure to ingest. Slice S6 replaces the
+    flat "normal" with a health-derived status once the model is scoring.
+    """
+    if deps.twin_hub is None:
+        return
+    payload = _decoded_asset(raw)
+    if payload is None:
+        return
+    deps.twin_hub.broadcast(
+        TwinEvent(
+            kind="status",
+            asset_id=payload,
+            status="normal",
+            observed_at=None,
+            published_at=datetime.now(tz=UTC),
+        )
+    )
+
+
+def _decoded_asset(raw: RawMessage) -> str | None:
+    """The asset id from an already-validated payload, or None if it is not readable."""
+    try:
+        payload = decode(raw.payload)
+    except DecodeError:
+        return None
+    asset_id = payload.get("asset_id")
+    return asset_id if isinstance(asset_id, str) else None
 
 
 async def consume_once(
@@ -147,10 +203,15 @@ async def consume_once(
     raw = await queue.get()
     try:
         for attempt in range(1, attempts + 1):
-            ackable = await asyncio.to_thread(dispose_message, deps, raw)
-            if ackable:
+            result = await asyncio.to_thread(dispose_message, deps, raw)
+            if result.ackable:
                 if deps.client is not None:
                     deps.client.ack(raw.mid, raw.qos)
+                # ONLY a newly-accepted reading is news for the twin. Acknowledgement is
+                # deliberately independent of the broadcast: a WS problem must never turn
+                # into a redelivery storm.
+                if result is Disposition.ACCEPTED:
+                    _emit_twin_event(deps, raw)
                 return
             if attempt < attempts:
                 deps.status.set_state(deps.status.state, error="storage failing; retrying")

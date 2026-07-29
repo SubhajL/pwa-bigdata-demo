@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/pipeline", tags=["pipeline"])
 
 
 @router.get("/status", summary="Live MQTT subscriber status (demo item 1.2)")
-async def pipeline_status(request: Request) -> dict[str, Any]:
+def pipeline_status(request: Request) -> dict[str, Any]:
     """Current subscriber state, connection counters, and queue pressure."""
     status = getattr(request.app.state, "pipeline_status", None)
     if status is None:
@@ -33,6 +33,13 @@ async def pipeline_status(request: Request) -> dict[str, Any]:
     # under the other's name would send an operator to query zero rows.
     snapshot["subscriber_run_id"] = getattr(request.app.state, "run_id", None)
     snapshot.pop("run_id", None)
+
+    # Twin fan-out health. `twin_subscribers` is how a leaked socket becomes visible:
+    # a client that goes away while telemetry is quiet used to leave its subscriber
+    # registered forever, and with admission capped that eventually refuses real clients.
+    hub = getattr(request.app.state, "twin_hub", None)
+    snapshot["twin_subscribers"] = hub.subscriber_count if hub is not None else 0
+    snapshot["twin_frames_dropped"] = hub.dropped if hub is not None else 0
 
     # Conservation, exposed rather than merely asserted in a test: every delivery became
     # exactly one telemetry row or one dead letter. Reported over ALL runs, so it reflects
