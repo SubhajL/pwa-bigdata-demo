@@ -20,7 +20,15 @@ class Device(BaseModel):
 
 
 class Reading(BaseModel):
-    """A validated telemetry point. Produced by S2 `validate()`."""
+    """A validated telemetry point. Produced by S2 `validate()`.
+
+    `message_id` and `run_id` are carried through from the wire envelope: the ledger
+    keys idempotency on the former, and the conservation invariant is only meaningful
+    when scoped by the latter (otherwise two demo runs against one volume contaminate
+    each other's counts).
+    """
+    message_id: str
+    run_id: str
     ts: datetime
     asset_id: str
     signal: Signal
@@ -30,6 +38,7 @@ class Reading(BaseModel):
 class DeadLetter(BaseModel):
     """A rejected message routed to the DLQ (S2)."""
     message_id: str
+    run_id: str | None
     asset_id: str | None
     reason: str
     raw: dict[str, Any]
