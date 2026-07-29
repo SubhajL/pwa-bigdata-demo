@@ -108,3 +108,90 @@ Verified by Claude, not by delegate report: ruff clean; mypy --strict clean (13 
 
 Residual / follow-up: CI is still absent repo-wide (Codex plan-review finding 9) — a
   Docker-capable workflow is its own slice, now meaningful since origin was created today.
+
+## 2026-07-29 — PR-2 (slice S2): ingest -> validate -> DLQ -> TSDB [Claude, never-delegate]
+
+Stop line: **none — Q0 fired** (migration + irreversible schema change; and the conservation
+/ never-stall invariants have no cheap oracle). Claude implemented the whole slice. Per
+g2-coding Phase 2c-ter the TDD standard still applied with no delegate: tests first, RED
+observed, then implementation.
+
+Delivered: 002_ingest_identity.sql; scripts/migrate.py (idempotent ordered runner +
+  schema_migrations); api/app/{db,ingest,service}.py; routes/{pipeline,telemetry}.py;
+  main.py rewiring (bounded queue, supervised consumer, pool lifecycle); compose gains
+  one-shot migrate+seed as COMPLETION dependencies, MQTT_ENABLED=1, overridable host ports;
+  mosquitto persistence on.
+
+Live verification (not just tests): full stack from a clean volume — migrate applied
+  001+002, seed loaded 238 devices, api reached connected/granted_qos=1; 147 published ->
+  147 telemetry, 0 DLQ, ledger 147; FAULT_MODE=bad_asset -> 58 dead letters with the right
+  reason and ingest continued; broker restart -> RECOVERED in 1.7s (budget 30s) with
+  received climbing 570->579; final ledger 631 = telemetry 463 + dlq 168, holds = true.
+
+QCHECK (g2-qcheck): Tier 1 = Claude (g2-check on the working tree). Tier 2 = Codex
+  gpt-5.6-sol xhigh — MANDATORY here (core contract + schema/migration change). DeepSeek
+  correctly excluded (scoped to code writing; it authored none of this).
+  Tier 2 reported 0 CRITICAL, 4 HIGH, 4 MEDIUM, 2 LOW. Two findings were discovered
+  independently by Claude first (JSONB unstorability, the three-snapshot conservation
+  count) — one defect, two witnesses. Full report: docs/codex-review-s2.md.
+
+  FIXED — HIGH:
+  - #1 a transient DB failure stranded the delivery: MQTT only guarantees redelivery on
+    RECONNECT, so an unacked message sits forever while the connection stays healthy and
+    status still reads "connected". consume_once now retries with bounded backoff and
+    records `unstored`; the old test passed while permanently losing its first message.
+  - #2 valid wire input could fail BOTH telemetry and DLQ persistence. `1e10000` decodes
+    to inf and json.dumps writes the bare token `Infinity`; `\u0000` in a string is
+    likewise unstorable — PostgreSQL rejects both, so the row could never be written and
+    the message was redelivered forever. Sub-finding Claude had NOT caught: a big enough
+    integer makes float() raise OverflowError, escaping MessageRejected entirely.
+    encode_raw now guarantees storability (base64 fallback) and validate catches Overflow.
+  - #3 asyncio.Queue is not thread-safe and `full()`-then-`put_nowait` raced across the
+    paho thread. Admission now happens entirely on the event loop; overflow is recorded
+    there instead of being lost after submit() already claimed success.
+  - #4 undecodable identity used topic+mid, and MQTT packet ids are reused after PUBACK,
+    so a DISTINCT later malformed delivery would be swallowed as a redelivery — silent
+    loss of exactly the evidence the DLQ exists to show. Now a per-process sequence, and
+    malformed rows carry the subscriber run_id instead of NULL so they are attributable.
+    (Claude had separately found and fixed the cross-SESSION half of this collision, via
+    a test that passed alone and failed in the suite.)
+
+  FIXED — MEDIUM/LOW:
+  - #5 conservation_counts took three snapshots; now one statement. (Found independently.)
+  - #6 disposition did not enforce that the ledger row and the telemetry row describe the
+    SAME delivery; now raises on mismatch. One existing test WAS passing mismatched ids.
+  - #8 the status endpoint advertised the API's run_id while rows carry the producer's —
+    a judge following it would query zero rows. Renamed to `subscriber_run_id` and
+    conservation is reported over all runs.
+  - #9 run_consumer's supervision was never exercised (every injected failure was caught
+    by a lower layer; mutation confirmed the try/except could be deleted). Now pinned by
+    raising from consume_once itself.
+  - Claude-found: `query_range` and `conservation_counts` were ORPHANS — tested but with
+    no runtime caller. Both are now wired to endpoints, which also makes the invariant
+    judge-visible. Compose hardcoded FAULT_MODE so the simulator's injectable faults were
+    unreachable from outside the file. PipelineStatus fields were mutated outside its lock.
+
+  RECORDED, NOT FIXED (with reason):
+  - #7 the reconnect test restarts the broker immediately, so only the first backoff
+    interval elapses; it would pass with paho's defaults too. Rather than imply otherwise,
+    the docstring now states exactly what it does and does not prove, and the settings are
+    pinned directly by test_reconnect_settings_are_inside_the_30s_budget. A discriminating
+    test needs a ~20s outage plus a packet-level blackhole — owner: slice S-D, which owns
+    rehearsed reconnect timing.
+  - #10 the migration runner is not concurrent-safe. It runs as a single one-shot compose
+    service, and current DDL is replay-tolerant. Owner: whoever adds a non-idempotent
+    backfill. Recorded so it is not rediscovered.
+  - Durable disk spool still deferred (DREP §9): messages now survive a broker restart
+    (durable session + persistence) and a DB outage (retry, then unacked), but not
+    simultaneous broker-and-process loss.
+  - CI still absent repo-wide.
+  - Codex could not append to this log (read-only sandbox); appended by Claude.
+
+Mutation evidence: reverting the QoS-1 re-subscription fails the reconnect test; acking
+  regardless of success fails the redelivery test; removing ALL containment layers fails
+  the resilience tests (removing any ONE does not — they are genuine defense in depth, and
+  the test pins the behaviour rather than an implementation detail).
+
+Verified by Claude: ruff clean; mypy --strict clean (18 files); pytest 60 passed x3
+  consecutive; simulator's 42 still green; AST check shows no function over 50 lines and
+  no `# type: ignore` anywhere in either service.

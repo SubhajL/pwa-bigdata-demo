@@ -6,10 +6,11 @@ services:
   mosquitto:
     image: eclipse-mosquitto:2.0.20
     ports:
-      - "1883:1883"
-      - "9001:9001"
+      - "${MQTT_PORT:-1883}:1883"
+      - "${MQTT_WS_PORT:-9001}:9001"
     volumes:
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
     healthcheck:
       test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/#' -C 1 -W 3 -h localhost || exit 1"]
       interval: 10s
@@ -23,15 +24,56 @@ services:
       POSTGRES_PASSWORD: pwa
       POSTGRES_DB: pwa
     ports:
-      - "5433:5432"          # 5433 on host: avoid a local Postgres already on 5432
+      # Host port is overridable: 5432 is usually taken by a local Postgres and 5433
+      # is not reliably free either (an unrelated container held it during S2).
+      - "${TSDB_PORT:-5433}:5432"
     volumes:
-      - ./db/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+      # Mount the whole directory, not one file: a fresh volume must receive EVERY
+      # NNN_*.sql in order. initdb only runs on an empty data directory, so existing
+      # stacks are upgraded by the `migrate` service below instead.
+      - ./db:/docker-entrypoint-initdb.d:ro
       - tsdb-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pwa -d pwa"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # ── one-shot: bring the schema up to date on an EXISTING volume ──────────────
+  # initdb is skipped whenever /var/lib/postgresql/data is already populated, so
+  # without this anyone who ran the stack before 002 existed would silently run new
+  # code against the old schema.
+  migrate:
+    build: ../api
+    command: python /srv/scripts/migrate.py
+    environment:
+      DATABASE_URL: postgresql://pwa:pwa@timescaledb:5432/pwa
+    volumes:
+      - ../scripts:/srv/scripts:ro
+      - ./db:/srv/infra/db:ro
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    restart: "no"
+
+  # ── one-shot: seed the device roster BEFORE anything publishes ───────────────
+  # telemetry.asset_id is a foreign key to device.asset_id. On a fresh volume the
+  # table is empty, so every message would be dead-lettered while the broker and the
+  # API both reported healthy. Ordering is enforced, not documented.
+  seed:
+    build: ../api
+    command: python /srv/scripts/seed_db.py
+    environment:
+      DATABASE_URL: postgresql://pwa:pwa@timescaledb:5432/pwa
+      CURATED_PATH: /srv/data/curated/water_sold_by_branch.csv
+    volumes:
+      - ../scripts:/srv/scripts:ro
+      - ../simulator:/srv/simulator:ro
+      - ../data/curated:/srv/data/curated:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
 
   api:
     build: ../api
@@ -40,12 +82,13 @@ services:
       DATABASE_URL: postgresql://pwa:pwa@timescaledb:5432/pwa
       MQTT_HOST: mosquitto
       MQTT_PORT: "1883"
-      MQTT_ENABLED: "0"          # S2 flips this on; S0 skeleton runs broker-less
+      MQTT_ENABLED: "1"          # S2: the subscriber is live
+      API_RUN_ID: ""             # blank => a fresh id per start (see Settings)
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
     depends_on:
-      timescaledb:
-        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
       mosquitto:
         condition: service_healthy
     healthcheck:
@@ -60,7 +103,6 @@ services:
     environment:
       MQTT_HOST: mosquitto
       MQTT_PORT: "1883"
-      RATE_HZ: "5"
       # The roster is derived from the real branch CSV, which is bind-mounted
       # rather than baked into the image (data/ is outside the build context).
       CURATED_PATH: /srv/data/curated/water_sold_by_branch.csv
@@ -68,8 +110,11 @@ services:
       # across restarts. The demo director pins this to label a scenario run.
       # NOTE: an empty env var is still "provided" to pydantic-settings, so the
       # blank is normalised back to a generated id by SimSettings._reject_blank_run_id.
-      RUN_ID: ""
-      FAULT_MODE: normal         # normal | anomaly | bad_asset | malformed
+      RUN_ID: "${RUN_ID:-}"
+      # Overridable from the environment so a demo scenario can inject a fault
+      # without editing this file: FAULT_MODE=bad_asset docker compose up simulator
+      FAULT_MODE: "${FAULT_MODE:-normal}"   # normal | anomaly | bad_asset | malformed
+      RATE_HZ: "${RATE_HZ:-5}"
     volumes:
       - ../data/curated:/srv/data/curated:ro
     # Scored item 1.2 is demonstrated by restarting the broker. The producer must
@@ -78,6 +123,8 @@ services:
     depends_on:
       mosquitto:
         condition: service_healthy
+      seed:
+        condition: service_completed_successfully
     profiles: ["sim"]            # started on demand (S1); not required for S0 health
 
   web:
@@ -86,8 +133,9 @@ services:
     environment:
       VITE_API_BASE: http://localhost:8000
     ports:
-      - "5173:5173"
+      - "${WEB_PORT:-5173}:5173"
     profiles: ["ui"]            # started on demand (S4+); not required for S0 health
 
 volumes:
   tsdb-data:
+  mosquitto-data:
