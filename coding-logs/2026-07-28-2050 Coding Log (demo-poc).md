@@ -798,3 +798,58 @@ observed_at asserted `== reading.ts` and `!= published_at`; finiteness asserted 
 `simulator` 48 tests, ruff + mypy clean. `TwinEvent`, conservation, DLQ, latency and every
 existing twin/ws/scoring test green — the hub change preserves them verbatim. Diff audit clean;
 the delegate touched only its two simulator files, no fabricated data.
+
+---
+
+## PR-7c — SVG digital-twin screen (2026-07-30) [Claude-authored, no delegate]
+
+Plan: `docs/DREP-PR7c-screen.md`. The final layer of the PR-7 split: 7a data, 7b events, 7c the
+screen. Scored items 2.1–2.5 (35 pts) become visible. Entirely Claude-authored: the WS
+lifecycle, the zoom math, the drop→impact flow and the baseline merge are correctness-dense
+enough that a delegate round would have cost more than it saved (Q1 across the whole slice).
+
+### What landed
+A twin feature module (`web/src/features/twin/`): `twin.config.ts` (the item-2.5 config file),
+`types.ts` (mirroring the 7a/7b API exactly), `twinClient.ts` (pure reducers: deriveStatus,
+isPressureDrop, outgoingPipes, zoomViewBox), `useTwinSocket.ts` (the live WS hook), and five
+components — `ProcessSchematic` (SVG viewBox zoom), `DeviceSymbol` (status→shape), `PipeEdge`,
+`SecTooltip`, `ImpactPanel`, `StatusCounters`. `OperationsTwinScreen` composes them; `routes.tsx`
+gained a built→screen mapping (NAV_ITEMS stays the sole registry) and `nav.operations.built=true`.
+`getJson`/`wsUrl` — declared orphans since PR-6 — finally have runtime callers. `formatDecimal`
+added to `lib/format.ts` because `Num` renders a real SEC 0.25 as "0".
+
+### Three adversarial passes; the QCHECK earned its keep again
+The plan-review Codex corrected the API shapes (BandsResponse is nested), the control frames
+(`disabled`/`busy`), and the `Num`-can't-do-decimals trap. The QCHECK Codex then found three
+HIGH the plan-review missed, all real and all fixed + mutation-verified:
+- **Generation ownership was per-mount, not per-socket** — a reconnect reused the mount
+  generation, so a retained stale callback could still pass the ownership check. Fixed: bump the
+  generation on every `connect()`. Test retains socket-1's handler across a reconnect and proves
+  it's rejected. (Mutation: removing the per-connect bump fails it.)
+- **A recovery missed while disconnected stayed critical forever** — the live health frame
+  overrode the fresh topology baseline on reconnect. Fixed: the hook clears `byAsset` on reopen,
+  so the screen resyncs from the refetched topology (persisted health).
+- **Concurrent drops were selected by topology order, not recency** — a later drop never became
+  active. Fixed: the screen picks the active drop by the pressure frame's `observed_at`. The
+  first version of this test was VACUOUS (the impact stub returned the same affected set for
+  every pipe); mutation caught it, and a pipe-specific stub now discriminates.
+
+MEDIUMs also fixed: parseFrame validates event_version/status/signal/types; PipeEdge exposes its
+affected state to assistive tech; a branching node's pipe_ids are deduped before impact requests;
+`nodata` got its own symbol (a dashed ring) so all four statuses read without colour; the
+SimulatedBadge is gated on the API `simulated` flags; `resyncPollMs` is now wired to a periodic
+topology refetch.
+
+### Declared limits (stated in-file, not pretended)
+jsdom proves the reducers, the lifecycle, the drop→impact wiring and the structure/attributes;
+it cannot prove visual zoom sharpness, the live browser→proxy→FastAPI flow, or real anomaly
+rendering. Those, and item 2.5's "repo shown in the IDE", are **PR-17's Playwright pass**. The
+affected-customer count is the API's real value (5 upstream / 2 for the last leg), never the
+mockup's fabricated 1,204.
+
+### Verified by Claude, under Claude's own hand
+`web` **202 tests, 3 consecutive runs** (baseline 148), typecheck 0, eslint 0 (incl. the
+React-Compiler-strict `set-state-in-effect`/`immutability`/`globals` rules — the effects were
+restructured to derive from render and only setState in async callbacks), `vite build` succeeds,
+token contract clean (no raw hex/palette/duration), axe clean on the loaded twin. Every existing
+PR-6 test (router, a11y, tokens) stays green with the built screen wired in.

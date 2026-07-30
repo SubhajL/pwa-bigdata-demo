@@ -110,3 +110,28 @@ export function formatMonthTh(month: string): string {
   const monthIdx = parseInt(m[2], 10) - 1;
   return `${THAI_MONTHS[monthIdx]} ${year + 543}`;
 }
+
+/**
+ * A fixed-decimal number in Thai locale — for values `Num` does not cover, notably Specific
+ * Energy Consumption (kWh/m³, e.g. 0.253). Returning it as an integer would print "0" for a
+ * real 0.25, which is why this exists.
+ *
+ * @param digits fraction digits, integer 0..6.
+ * @returns the value to `digits` places; {@link DASH} for null/undefined/non-finite. A real 0
+ *   renders "0.00…" (a measured zero), distinct from the dash.
+ * @throws RangeError when `digits` is not an integer in 0..6.
+ */
+export function formatDecimal(
+  value: number | null | undefined,
+  digits = 2,
+  locale = "th-TH",
+): string {
+  if (!Number.isInteger(digits) || digits < 0 || digits > 6) {
+    throw new RangeError(`digits must be an integer in 0..6, got ${digits}`);
+  }
+  if (value == null || !Number.isFinite(value)) return DASH;
+  return new Intl.NumberFormat(locale, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value);
+}

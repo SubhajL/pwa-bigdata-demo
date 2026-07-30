@@ -112,7 +112,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     icon: Factory,
     section: "operations",
     screen: "S4",
-    built: false,
+    built: true,
     ownedBy: "PR-7",
   },
   {
