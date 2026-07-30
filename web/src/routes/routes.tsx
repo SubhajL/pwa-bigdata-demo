@@ -8,10 +8,22 @@
  */
 import { Navigate, type RouteObject } from "react-router-dom";
 
+import type { ComponentType } from "react";
+
 import { AppShell } from "@/components/AppShell";
 import { NotFoundScreen } from "@/screens/NotFoundScreen";
+import { OperationsTwinScreen } from "@/screens/OperationsTwinScreen";
 import { PlaceholderScreen } from "@/screens/PlaceholderScreen";
 import { NAV_ITEMS, type NavItem } from "@/routes/nav";
+
+/**
+ * The real screen for each BUILT nav item, keyed by its id. An unbuilt item (absent here, or
+ * `built: false`) falls back to `PlaceholderScreen` — so `NAV_ITEMS` stays the single registry
+ * and a screen PR wires itself by adding one entry and flipping `built`.
+ */
+const SCREENS: Readonly<Record<string, ComponentType>> = {
+  operations: OperationsTwinScreen,
+};
 
 /**
  * Build the route tree from the SAME registry the sidebar renders.
@@ -34,12 +46,15 @@ export function buildRoutes(items: readonly NavItem[] = NAV_ITEMS): RouteObject[
         // more moving parts than an index redirect is worth; `<Navigate/>` costs one
         // effect tick and nothing else.
         { index: true, element: <Navigate to={items[0].path} replace /> },
-        ...items.map((item) => ({
-          path: item.path.replace(/^\//, ""),
-          // Every entry currently routes to the placeholder. As each screen PR lands it
-          // replaces this element and flips `built` in the registry.
-          element: <PlaceholderScreen item={item} />,
-        })),
+        ...items.map((item) => {
+          const Built = item.built ? SCREENS[item.id] : undefined;
+          return {
+            path: item.path.replace(/^\//, ""),
+            // A built item renders its real screen; everything else renders the honest
+            // "not built yet" placeholder.
+            element: Built ? <Built /> : <PlaceholderScreen item={item} />,
+          };
+        }),
         { path: "*", element: <NotFoundScreen /> },
       ],
     },
