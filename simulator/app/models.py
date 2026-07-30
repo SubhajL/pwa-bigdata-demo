@@ -24,6 +24,7 @@ class FaultMode(str, Enum):
     ANOMALY = "anomaly"
     BAD_ASSET = "bad_asset"
     MALFORMED = "malformed"
+    PRESSURE_DROP = "pressure_drop"
 
 
 #: Physically plausible operating band per signal, `(low, high)` inclusive.

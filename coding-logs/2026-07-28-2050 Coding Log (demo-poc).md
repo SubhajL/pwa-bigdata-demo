@@ -721,3 +721,80 @@ known status" the code does not read.
 files, no fabricated data, no test weakened. The delegate reported "1 pre-existing
 `test_latency` failure" — **that was wrong; the full suite is green**, which is exactly why
 the gates are re-run rather than trusted.
+
+---
+
+## PR-7b — digital-twin event chain (2026-07-30) [Mode A, mostly Claude / DeepSeek for the simulator]
+
+Plan: `docs/DREP-PR7b-events.md`. Delegate: DeepSeek V4 Pro via `pi` (simulator slice only,
+~10 lines). **1 delegate fix round (0; the simulator change was clean); Claude took 1 QCHECK
+fix round covering a HIGH + 4 MEDIUM.**
+
+The middle layer of the three-way PR-7 split: 7a gave the twin its data, 7b makes the live
+channel carry the truth. Ingest published a hardcoded `status="normal"` and dropped the
+reading; the hub coalesced by `asset_id` alone so a persistent pressure warning flickered.
+
+### What landed
+- `api/app/bands.py` + `classify_signal` — band-based status, drift-tested against BOTH the
+  simulator's `SIGNAL_BANDS` and ingest's `VALID_SIGNALS` (so ingest can't accept a signal
+  with no band → post-ack KeyError).
+- `_emit_twin_event` now emits the reading's real signal/value/observed_at + classified
+  status, threading the validated `Reading` via a private `_dispose` (no second decode; the
+  public `dispose_message` enum contract is preserved). The emitter is explicitly total.
+- `TwinHub` **two-tier buffer** — see below.
+- `/api/twin/bands` so 7c distinguishes a pressure DROP from a spike without hardcoding.
+- topology status from persisted health (deadlock-safe, scoring's own thresholds).
+- simulator `FAULT_MODE=pressure_drop` — a **targeted** fault (non-pressure signals
+  byte-identical to NORMAL), advertised in compose + env.sample.
+
+### The planning pass earned its keep (twice), and so did QCHECK
+
+The plan's first draft proposed a composite `(asset,kind,signal)` hub key; the **planning-pass
+Codex** showed it weakened the per-asset capacity guarantee, so I **dropped the hub change**
+and argued the frontend (7c) would hold per-signal state. **The QCHECK Codex proved that wrong**:
+it reproduced a flash-red race a prompt client cannot fix — `scoring` (health) and `ingest`
+(status) can both broadcast for one asset in a single event-loop turn, so `status:normal`
+overwrote a pending `health:critical` **before the drainer woke**, and the client never
+received the critical at all.
+
+The resolution is the design BOTH Codex passes actually pointed at: a **two-tier buffer**,
+`asset_id -> {(kind,signal) -> latest frame}`. Capacity still counts ASSETS (the 64-asset
+guarantee and every verbatim `test_twin_ws.py` case survive), but within an asset a health
+frame and each per-signal status frame coexist instead of clobbering. Mutation-verified:
+collapsing the `(kind,signal)` key to a constant fails the flash-red test.
+
+Lesson recorded: I under-scoped by trusting a design argument ("the frontend will handle it")
+over a demonstrated race. The second adversarial pass is not redundant with the first.
+
+### The test-isolation bug I introduced, found by the gates
+
+`test_twin_status_emit` originally drove the full DB accept path, inserting P-2 telemetry
+rows. That reliably broke `test_latency`'s index-seek assertion in the full suite (Timescale
+autoanalyze flipped the planner onto the time-only chunk index) — 3/3 fail on my branch, 215/215
+on main. Bisected file-by-file to that test. **Fix: the emitter's contract (classify +
+broadcast) needs no DB, so the test now calls `_emit_twin_event` with a constructed `Reading`
+and a real hub — zero DB churn.** The accept→emit wiring stays covered by the existing
+`test_twin_emission.py`. After the rewrite: `test_latency` stable, full suite 243×3.
+
+### QCHECK — Tier 1 Claude, Tier 2 Codex gpt-5.6-sol @ xhigh. Verdict BLOCK: 1 HIGH, 4 MEDIUM.
+All fixed: HIGH (two-tier hub, above); pressure_drop made a targeted fault + equality test;
+emitter totality now tested (exploding hub); T5b exercises the full `_next_message` wire path;
+topology threshold test uses a warning-band score to pin the exact `pwa_ml.predict` constants;
+observed_at asserted `== reading.ts` and `!= published_at`; finiteness asserted with
+`math.isfinite`. Also updated `test_consumer_resilience` to patch the new `_dispose` seam
+(same intent — the drain loop survives an escaping exception).
+
+### Declared, carried to 7c (the wire contract 7c consumes)
+- A device's symbol status = max severity across its live per-signal `status` frames AND its
+  `health` frame; 7c keeps `Map<asset,{perSignal,health}>`.
+- The affected pipe on a pressure event = the pipe whose `from_node` == the dropping device's
+  `node`; 7c calls `/api/twin/impact` (and uses `/api/twin/bands` to confirm `value < low`).
+- Render the REAL 5 affected customers, never the mockup's "1,204".
+- Ingest band status reaches at most `warning` for the simulator's modes; `critical` comes
+  from the scoring/health path. PR-17 must not claim these modes show `critical`.
+
+### Verified by Claude, under Claude's own hand
+`api` **243 tests, 3 consecutive runs** (baseline 215), ruff + mypy `--strict` clean (48 files);
+`simulator` 48 tests, ruff + mypy clean. `TwinEvent`, conservation, DLQ, latency and every
+existing twin/ws/scoring test green — the hub change preserves them verbatim. Diff audit clean;
+the delegate touched only its two simulator files, no fabricated data.

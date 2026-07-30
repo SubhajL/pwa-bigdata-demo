@@ -10,7 +10,9 @@ coordinates and the five customer ids. No real customer PII exists in this repo.
 from __future__ import annotations
 
 from psycopg_pool import ConnectionPool
+from pwa_ml.predict import CRITICAL_BELOW, WARNING_BELOW
 
+from .health_store import latest_statuses
 from .models import (
     AffectedCustomer,
     ImpactResponse,
@@ -35,15 +37,19 @@ def load_topology(pool: ConnectionPool) -> TwinTopology:
     A device appears only when it has a `node` AND coordinates — an unplaced device cannot
     be drawn, and inventing a position for it would fabricate network geography.
 
-    `status` is currently `nodata` for EVERY device, and that is deliberate rather than a
-    placeholder: PR-7a builds the twin's data chain only. Nothing persists a per-device twin
-    status yet — ingest still emits a hardcoded `normal` (`service.py::_emit_twin_event`),
-    which is precisely what **PR-7b** fixes. Reporting `nodata` is the honest answer to
-    "what is this device's status?" when the answer is not yet known.
+    `status` is the device's latest PERSISTED health status (`health_store.latest_statuses`),
+    or `nodata` when it has none. It must NEVER default to `normal`: a device we know nothing
+    about must not render as healthy on a control-room screen.
 
-    It must NEVER default to `normal`: a device we know nothing about must not render as
-    healthy on a control-room screen. Recorded in the coding log as a declared gap so the
-    permanent `nodata` is not mistaken for a bug or for a working status feed.
+    The status lookup runs AFTER this function's device-query connection is released.
+    `latest_statuses` acquires its own connection, so looking it up while still holding one
+    would deadlock a min-size-1 pool — `test_topology_status` runs against exactly such a
+    pool to prove it does not.
+
+    Only slower model *health* status is persisted; instantaneous per-reading band status is
+    live-only, over `WS /ws/twin` (see `service.py::_emit_twin_event`), so a device with a
+    band anomaly but no health row yet shows `nodata` until its next live frame — honest, and
+    the frame arrives within a tick.
     """
     with pool.connection() as conn, conn.cursor() as cur:
         # Nodes: union of from_node and to_node with coordinates from the edges.
@@ -76,14 +82,21 @@ def load_topology(pool: ConnectionPool) -> TwinTopology:
             "WHERE node IS NOT NULL AND x IS NOT NULL AND y IS NOT NULL"
         )
         device_rows = cur.fetchall()
-        devices = [
-            TwinDeviceView(
-                asset_id=row[0], kind=row[1], node=row[2],
-                x=float(row[3]), y=float(row[4]), dma=row[5],
-                status="nodata",
-            )
-            for row in device_rows
-        ]
+
+    # Connection released above. Only NOW look up statuses — latest_statuses acquires its
+    # own connection, and a min-size-1 pool would deadlock if we held one here.
+    asset_ids = [row[0] for row in device_rows]
+    statuses = latest_statuses(
+        pool, asset_ids, warning_below=WARNING_BELOW, critical_below=CRITICAL_BELOW
+    )
+    devices = [
+        TwinDeviceView(
+            asset_id=row[0], kind=row[1], node=row[2],
+            x=float(row[3]), y=float(row[4]), dma=row[5],
+            status=statuses.get(row[0], "nodata"),
+        )
+        for row in device_rows
+    ]
 
     return TwinTopology(nodes=nodes, pipes=pipes, devices=devices)
 

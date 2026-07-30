@@ -24,6 +24,7 @@ from typing import Any, Protocol
 import paho.mqtt.client as mqtt
 from psycopg_pool import ConnectionPool
 
+from .bands import classify_signal
 from .db import Accepted, Rejected, disposition, known_asset_ids
 from .ingest import (
     DecodeError,
@@ -35,7 +36,7 @@ from .ingest import (
     decode,
     validate,
 )
-from .models import TwinEvent
+from .models import Reading, TwinEvent
 from .ws import TwinHub
 
 logger = logging.getLogger(__name__)
@@ -136,8 +137,13 @@ class Disposition(Enum):
         return self is not Disposition.FAILED
 
 
-def dispose_message(deps: IngestDeps, raw: RawMessage) -> Disposition:
-    """Classify and persist one message, reporting which of the four outcomes occurred."""
+def _dispose(deps: IngestDeps, raw: RawMessage) -> tuple[Disposition, Reading | None]:
+    """Classify and persist one message; report the outcome AND the accepted Reading.
+
+    The Reading is returned so the twin emitter can publish the reading's real signal and
+    value WITHOUT a second decode — validation already produced it inside `Accepted`. It is
+    present only on a newly-accepted delivery (None for a duplicate, reject, or failure).
+    """
     try:
         # Inside the try: classification itself must not be able to escape and leave the
         # message unacked forever (an OverflowError here used to do exactly that).
@@ -150,43 +156,55 @@ def dispose_message(deps: IngestDeps, raw: RawMessage) -> Disposition:
         # Broad by necessity: any database-side failure must leave the message unacked
         # rather than kill the consumer. It is logged, never swallowed silently.
         logger.exception("disposition failed for mid=%s; will retry", raw.mid)
-        return Disposition.FAILED
+        return Disposition.FAILED, None
     if not newly:
-        return Disposition.DUPLICATE
-    return Disposition.ACCEPTED if isinstance(outcome, Accepted) else Disposition.REJECTED
+        return Disposition.DUPLICATE, None
+    if isinstance(outcome, Accepted):
+        return Disposition.ACCEPTED, outcome.reading
+    return Disposition.REJECTED, None
 
 
-def _emit_twin_event(deps: IngestDeps, raw: RawMessage) -> None:
+def dispose_message(deps: IngestDeps, raw: RawMessage) -> Disposition:
+    """Classify and persist one message, reporting which of the four outcomes occurred.
+
+    Thin wrapper over `_dispose` that preserves the enum-only public contract (pinned by
+    `test_twin_emission.test_disposition_reports_which_outcome_occurred`).
+    """
+    disposition_result, _reading = _dispose(deps, raw)
+    return disposition_result
+
+
+def _emit_twin_event(deps: IngestDeps, reading: Reading) -> None:
     """Publish a live status frame for an accepted reading.
 
-    Deliberately fire-and-forget: `TwinHub.broadcast` is synchronous and total, so a
-    backgrounded browser tab cannot apply back-pressure to ingest. Slice S6 replaces the
-    flat "normal" with a health-derived status once the model is scoring.
+    Carries the reading's REAL signal, value and observation time, and a status classified
+    from that signal's band — so a pump anomaly changes the twin's symbol the moment the
+    reading arrives (scored items 2.2/2.3), rather than the flat "normal" this used to send.
+
+    Fire-and-forget and TOTAL: it runs AFTER the message is acked, inside the consumer's
+    containment, so a classify/serialize/hub error here must be logged and swallowed — never
+    raised. `TwinHub.broadcast` propagates an `_offer` failure, and the ingest-never-blocks
+    rule means one unlucky frame is dropped, not the loop stalled.
     """
     if deps.twin_hub is None:
         return
-    payload = _decoded_asset(raw)
-    if payload is None:
-        return
-    deps.twin_hub.broadcast(
-        TwinEvent(
-            kind="status",
-            asset_id=payload,
-            status="normal",
-            observed_at=None,
-            published_at=datetime.now(tz=UTC),
-        )
-    )
-
-
-def _decoded_asset(raw: RawMessage) -> str | None:
-    """The asset id from an already-validated payload, or None if it is not readable."""
     try:
-        payload = decode(raw.payload)
-    except DecodeError:
-        return None
-    asset_id = payload.get("asset_id")
-    return asset_id if isinstance(asset_id, str) else None
+        status = classify_signal(reading.signal, reading.value)
+        deps.twin_hub.broadcast(
+            TwinEvent(
+                kind="status",
+                asset_id=reading.asset_id,
+                status=status,
+                signal=reading.signal,
+                value=reading.value,
+                observed_at=reading.ts,
+                published_at=datetime.now(tz=UTC),
+            )
+        )
+    except Exception:
+        # Post-ack and non-critical: the reading is safely stored; the twin simply misses
+        # this frame and the next reading re-announces the device's state.
+        logger.exception("twin emit failed for asset=%s; frame dropped", reading.asset_id)
 
 
 async def consume_once(
@@ -203,15 +221,15 @@ async def consume_once(
     raw = await queue.get()
     try:
         for attempt in range(1, attempts + 1):
-            result = await asyncio.to_thread(dispose_message, deps, raw)
+            result, reading = await asyncio.to_thread(_dispose, deps, raw)
             if result.ackable:
                 if deps.client is not None:
                     deps.client.ack(raw.mid, raw.qos)
                 # ONLY a newly-accepted reading is news for the twin. Acknowledgement is
                 # deliberately independent of the broadcast: a WS problem must never turn
                 # into a redelivery storm.
-                if result is Disposition.ACCEPTED:
-                    _emit_twin_event(deps, raw)
+                if result is Disposition.ACCEPTED and reading is not None:
+                    _emit_twin_event(deps, reading)
                 return
             if attempt < attempts:
                 deps.status.set_state(deps.status.state, error="storage failing; retrying")
