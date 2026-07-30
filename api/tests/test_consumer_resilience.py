@@ -24,6 +24,7 @@ from psycopg_pool import ConnectionPool
 from app import service
 from app.db import Accepted, Rejected, conservation_counts
 from app.ingest import PipelineStatus, RawMessage
+from app.models import Reading
 from app.service import Disposition, IngestDeps, consume_once, load_roster, run_consumer
 
 pytestmark = pytest.mark.integration
@@ -162,25 +163,26 @@ async def test_a_failure_escaping_the_db_layer_still_does_not_stall_the_loop(
 ) -> None:
     """Containment at the CONSUMER boundary, not just inside the DB helper.
 
-    `dispose_message` catches database errors itself, so patching `disposition` never
-    exercises the layer above it — mutation showed the consumer's own `try/except` could
-    be deleted with every other test still green. This injects a failure that escapes
-    `dispose_message` entirely, which is the only thing that proves the drain loop is
-    genuinely supervised.
+    `_dispose` catches database errors itself, so patching `disposition` never exercises
+    the layer above it — mutation showed the consumer's own `try/except` could be deleted
+    with every other test still green. This injects a failure that escapes `_dispose`
+    entirely (the seam `consume_once` actually calls, since PR-7b it returns the accepted
+    Reading alongside the Disposition), which is the only thing that proves the drain loop
+    is genuinely supervised.
     """
     run_id = f"escape-{uuid.uuid4().hex[:8]}"
     deps = _deps(timescale_dsn)
     queue: asyncio.Queue[RawMessage] = asyncio.Queue()
-    real = service.dispose_message
+    real = service._dispose
     calls = {"n": 0}
 
-    def exploding(d: IngestDeps, raw: RawMessage) -> Disposition:
+    def exploding(d: IngestDeps, raw: RawMessage) -> tuple[Disposition, Reading | None]:
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("escaped the db layer entirely")
         return real(d, raw)
 
-    monkeypatch.setattr(service, "dispose_message", exploding)
+    monkeypatch.setattr(service, "_dispose", exploding)
     task = asyncio.create_task(run_consumer(deps, queue))
     try:
         await queue.put(_raw(run_id, 0))

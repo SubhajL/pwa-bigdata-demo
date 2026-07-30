@@ -11,7 +11,8 @@ import logging
 
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 
-from ..models import ImpactResponse, SecResponse, TwinTopology
+from ..bands import SIGNAL_BANDS
+from ..models import BandsResponse, ImpactResponse, SecResponse, SignalBand, TwinTopology
 from ..ws import Subscriber, TwinHub
 
 logger = logging.getLogger(__name__)
@@ -235,3 +236,21 @@ def twin_impact(request: Request, pipe_id: str) -> ImpactResponse:
         return downstream_customers(pool, pipe_id)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"unknown pipe {pipe_id!r}") from None
+
+
+@router.get(
+    "/api/twin/bands",
+    response_model=BandsResponse,
+    summary="Signal operating bands (scored item 2.4)",
+)
+def twin_bands() -> BandsResponse:
+    """The physical operating band per signal, so the twin can tell a drop from a spike.
+
+    Static constants — no database, always available.
+    """
+    return BandsResponse(
+        bands={
+            sig: SignalBand(low=low, high=high)
+            for sig, (low, high) in SIGNAL_BANDS.items()
+        }
+    )

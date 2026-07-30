@@ -40,6 +40,9 @@ def make_signal(dev: Device, tick: int, mode: FaultMode) -> tuple[Signal, float]
         - the value is finite;
         - for `FaultMode.NORMAL` it lies inside `SIGNAL_BANDS[signal]`;
         - for `FaultMode.ANOMALY` at least one signal per cycle lies outside it;
+        - for `FaultMode.PRESSURE_DROP` `pressure_bar` lies BELOW its band and EVERY other
+          signal is byte-identical to what NORMAL would produce (a targeted fault, so a
+          motor and a pump's non-pressure signals are genuinely unaffected);
         - the signal is drawn from `KIND_SIGNALS[dev.kind]`.
     """
     repertoire = KIND_SIGNALS[dev.kind]
@@ -48,10 +51,17 @@ def make_signal(dev: Device, tick: int, mode: FaultMode) -> tuple[Signal, float]
     band_range = high - low
     margin = max(band_range * 0.02, 0.01)
 
-    seed = zlib.crc32(f"{dev.asset_id}|{tick}|{mode.value}".encode())
+    targeted_drop = mode is FaultMode.PRESSURE_DROP and signal == "pressure_bar"
+    # A non-pressure signal under PRESSURE_DROP must be IDENTICAL to NORMAL — so it seeds
+    # from NORMAL, not from PRESSURE_DROP. Only the targeted pressure reading uses the
+    # drop mode's own stream. This is what makes pressure_drop a genuinely targeted fault.
+    seed_mode = mode if (mode is not FaultMode.PRESSURE_DROP or targeted_drop) else FaultMode.NORMAL
+    seed = zlib.crc32(f"{dev.asset_id}|{tick}|{seed_mode.value}".encode())
     rng = random.Random(seed)
 
-    if mode is FaultMode.ANOMALY:
+    if targeted_drop:
+        value = rng.uniform(low - band_range * 0.5, low - margin)
+    elif mode is FaultMode.ANOMALY:
         value = rng.uniform(high + margin, high + band_range * 0.5)
     else:
         value = rng.uniform(low + margin, high - margin)

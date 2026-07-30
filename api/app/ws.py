@@ -27,62 +27,96 @@ from .models import TwinEvent
 
 logger = logging.getLogger(__name__)
 
-#: Distinct assets buffered per subscriber before the least-recently-updated is dropped.
+#: Distinct ASSETS buffered per subscriber before the least-recently-updated is dropped.
+#: The bound is per-asset, NOT per-frame: an asset may hold one frame per (kind, signal),
+#: bounded by the signal repertoire (≤6), so the memory ceiling stays ~6·max_queue frames.
 DEFAULT_MAX_QUEUE = 64
 
 #: Concurrent twin clients. The demo has one browser; the cap exists so a leak or a
 #: hostile client cannot turn fan-out into an ingest problem.
 DEFAULT_MAX_SUBSCRIBERS = 64
 
+#: The coalescing key WITHIN one asset's buffer: (kind, signal). `signal` is None for a
+#: `health` frame. Two DIFFERENT signals — or a health frame vs a status frame — never
+#: coalesce, so a pending `pressure_bar:warning` or `health:critical` is not overwritten by
+#: a later `flow_m3h:normal` before the socket task drains it. Newest wins WITHIN a key.
+FrameKey = tuple[str, str | None]
+
+
+def _frame_key(event: TwinEvent) -> FrameKey:
+    return (event.kind, event.signal)
+
 
 class Subscriber:
-    """One connected twin client: the latest frame per asset, oldest-update first."""
+    """One connected twin client.
+
+    A two-tier buffer: `asset_id -> {(kind, signal) -> latest TwinEvent}`, least-recently-
+    updated asset first. Keyed by asset for the CAPACITY bound (so the "N distinct assets"
+    guarantee survives), and sub-keyed by (kind, signal) so a device's health frame and its
+    per-signal status frames coexist instead of clobbering one another.
+
+    The clobber this fixes is real even for a prompt client: `scoring` and `ingest` can both
+    broadcast for the same asset within one event-loop turn, so with a flat asset->frame map
+    a `status:normal` overwrites a pending `health:critical` before the awakened drainer runs
+    — the twin flashes red and reverts, and the client never receives the critical at all.
+    """
 
     __slots__ = ("_pending", "_max", "_wakeup")
 
     def __init__(self, max_queue: int) -> None:
         import asyncio
 
-        self._pending: OrderedDict[str, TwinEvent] = OrderedDict()
+        self._pending: OrderedDict[str, OrderedDict[FrameKey, TwinEvent]] = OrderedDict()
         self._max = max_queue
         self._wakeup = asyncio.Event()
 
     async def get(self) -> TwinEvent:
-        """Await the next frame, oldest pending asset first."""
+        """Await the next frame: oldest pending asset, oldest frame within it."""
         while not self._pending:
             self._wakeup.clear()
             await self._wakeup.wait()
-        _asset, event = self._pending.popitem(last=False)
+        asset_id = next(iter(self._pending))
+        bucket = self._pending[asset_id]
+        _key, event = bucket.popitem(last=False)
+        if not bucket:
+            del self._pending[asset_id]
         return event
 
     def qsize(self) -> int:
-        return len(self._pending)
+        """Total pending frames across all assets."""
+        return sum(len(bucket) for bucket in self._pending.values())
 
     def _offer(self, event: TwinEvent) -> bool:
-        """Queue `event`, replacing any pending frame for the same asset.
+        """Buffer `event`, coalescing by (asset, kind, signal). Newest wins within a key.
 
-        Returns True when an unrelated asset had to be evicted to make room.
+        Returns True when an unrelated ASSET had to be evicted to stay within `max_queue`.
+        An already-buffered asset never triggers eviction — only a NEW asset does, so the
+        bound counts assets, not frames.
         """
+        asset_id = event.asset_id
         evicted = False
-        if event.asset_id in self._pending:
-            del self._pending[event.asset_id]       # replace, keeping arrival order fair
+        if asset_id in self._pending:
+            self._pending.move_to_end(asset_id)  # least-recently-updated goes last
         elif len(self._pending) >= self._max:
             self._evict_one()
             evicted = True
-        self._pending[event.asset_id] = event
+        bucket = self._pending.setdefault(asset_id, OrderedDict())
+        if (key := _frame_key(event)) in bucket:
+            del bucket[key]  # re-insert so newest sorts last within the asset
+        bucket[key] = event
         self._wakeup.set()
         return evicted
 
     def _evict_one(self) -> None:
-        """Drop the least-recently-updated frame, preferring a routine one.
+        """Drop the least-recently-updated ASSET, preferring one that is entirely routine.
 
-        Plain LRU would let a burst of `normal` chatter from other devices evict a
-        pending `critical`, and with no resynchronisation protocol the twin would show
-        that device as healthy indefinitely. Losing a routine update is recoverable —
-        the next reading replaces it — so routine frames are surrendered first.
+        Plain LRU would let a burst of `normal` chatter from other devices evict a pending
+        `critical`, and with no resynchronisation protocol the twin would show that device as
+        healthy indefinitely. An asset whose every buffered frame is `normal` is recoverable
+        — its next reading replaces it — so those are surrendered first.
         """
-        for asset_id, pending in self._pending.items():
-            if pending.status == "normal":
+        for asset_id, bucket in self._pending.items():
+            if all(frame.status == "normal" for frame in bucket.values()):
                 del self._pending[asset_id]
                 return
         self._pending.popitem(last=False)  # everything pending is notable; drop the oldest

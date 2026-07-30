@@ -356,3 +356,21 @@ class SecResponse(BaseModel):
     skew_s: float | None = None
     simulated: bool = True
     detail: str | None = None
+
+
+class SignalBand(BaseModel):
+    """One signal's plausible operating band, exposed so the twin can classify direction."""
+
+    low: float
+    high: float
+
+
+class BandsResponse(BaseModel):
+    """The physical operating bands, keyed by signal (scored item 2.4).
+
+    Read-only static constants. The frontend uses them to distinguish a pressure DROP
+    (value below `low`) from a spike (value above `high`) without hardcoding thresholds.
+    """
+
+    bands: dict[str, SignalBand]
+    simulated: bool = True

@@ -150,7 +150,7 @@ services:
       RUN_ID: "${RUN_ID:-}"
       # Overridable from the environment so a demo scenario can inject a fault
       # without editing this file: FAULT_MODE=bad_asset docker compose up simulator
-      FAULT_MODE: "${FAULT_MODE:-normal}"   # normal | anomaly | bad_asset | malformed
+      FAULT_MODE: "${FAULT_MODE:-normal}"   # normal | anomaly | pressure_drop | bad_asset | malformed
       RATE_HZ: "${RATE_HZ:-5}"
     volumes:
       - ../data/curated:/srv/data/curated:ro
