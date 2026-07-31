@@ -1,13 +1,13 @@
-import { formatInt, formatM3, formatPercent } from "@/lib/format";
+import { formatDecimal, formatInt, formatM3, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-export type NumKind = "int" | "m3" | "percent";
+export type NumKind = "int" | "m3" | "percent" | "decimal";
 
 export interface NumProps {
   readonly value: number | null | undefined;
   /** Which formatter to apply. Defaults to "int". */
   readonly kind?: NumKind;
-  /** Fraction digits, forwarded to formatPercent. Ignored for other kinds. */
+  /** Fraction digits, forwarded to formatPercent and formatDecimal. Ignored for int/m3. */
   readonly digits?: number;
   readonly className?: string;
 }
@@ -30,6 +30,8 @@ export function Num(props: NumProps): JSX.Element {
     text = formatM3(value);
   } else if (kind === "percent") {
     text = formatPercent(value, digits);
+  } else if (kind === "decimal") {
+    text = formatDecimal(value, digits);
   } else {
     text = formatInt(value);
   }

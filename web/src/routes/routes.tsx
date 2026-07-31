@@ -13,6 +13,7 @@ import type { ComponentType } from "react";
 import { AppShell } from "@/components/AppShell";
 import { NotFoundScreen } from "@/screens/NotFoundScreen";
 import { OperationsTwinScreen } from "@/screens/OperationsTwinScreen";
+import { PipelineMonitorScreen } from "@/screens/PipelineMonitorScreen";
 import { PlaceholderScreen } from "@/screens/PlaceholderScreen";
 import { NAV_ITEMS, type NavItem } from "@/routes/nav";
 
@@ -23,6 +24,7 @@ import { NAV_ITEMS, type NavItem } from "@/routes/nav";
  */
 const SCREENS: Readonly<Record<string, ComponentType>> = {
   operations: OperationsTwinScreen,
+  pipeline: PipelineMonitorScreen,
 };
 
 /**

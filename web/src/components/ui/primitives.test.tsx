@@ -43,6 +43,11 @@ describe("Num — the only sanctioned way to render a numeral", () => {
     expect(container.textContent).toBe("-2.0%");
     rerender(<Num value={1.2345} kind="percent" digits={2} />);
     expect(container.textContent).toBe("+1.23%");
+    // decimal (PR-8): latency ms / msg/s need fraction digits int would round away.
+    rerender(<Num value={3.14159} kind="decimal" digits={2} />);
+    expect(container.textContent).toBe("3.14");
+    rerender(<Num value={0} kind="decimal" digits={2} />);
+    expect(container.textContent).toBe("0.00"); // a measured zero, distinct from the dash
   });
 });
 
