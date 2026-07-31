@@ -123,7 +123,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     icon: CircleCheck,
     section: "operations",
     screen: "S8",
-    built: false,
+    built: true,
     ownedBy: "PR-8",
   },
   {

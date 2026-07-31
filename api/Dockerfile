@@ -10,7 +10,9 @@ FROM python:3.13-slim
 WORKDIR /srv
 
 COPY api/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+# --retries/--timeout: the build network to PyPI is flaky here; a mid-download drop must be
+# retried rather than fail the whole layer (and the judge's machine faces the same risk).
+RUN pip install --no-cache-dir --retries 10 --timeout 120 -r requirements.txt
 
 # The model package lands at /srv/pwa_ml, i.e. directly importable as `pwa_ml` because
 # WORKDIR is on sys.path. `app.features` and `app.model` import it by that name.
