@@ -108,12 +108,15 @@ function LoadedContent({
         </div>
       </div>
       {/* key={selected} resets the feedback form's ack/error when the device changes, so a pending
-          A response can never surface under B (Codex: feedback state must be asset-owned). */}
+          A response can never surface under B. ALL prediction fields come from the masked, asset-
+          owned insight (not the fleet card), so the stored verdict records what THIS device was
+          predicted — including its own model_version (Codex: feedback must be fully asset-owned). */}
       <FeedbackPanel
         key={selected ?? "none"}
         asset={selected}
         predictedHealth={insight.insight?.health.health_score ?? null}
-        modelVersion={modelVersion}
+        predictedPttf={insight.insight?.health.pttf_hours ?? null}
+        modelVersion={insight.insight?.health.model_version ?? null}
       />
       <footer className="flex items-center gap-2 text-dense text-on-surface-variant">
         <SimulatedBadge /> ผลการพยากรณ์ทั้งหมด (Health Score · PTTF · RCA) มาจากแบบจำลองที่ฝึกด้วยข้อมูลจำลอง

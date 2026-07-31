@@ -13,7 +13,10 @@ import type { Verdict } from "./types";
 
 export interface FeedbackPanelProps {
   readonly asset: string | null;
+  /** The prediction the technician is judging — ALL asset-owned (from the masked insight), so the
+   *  stored verdict records what THIS device was actually predicted, not the fleet's model card. */
   readonly predictedHealth?: number | null;
+  readonly predictedPttf?: number | null;
   readonly modelVersion?: string | null;
 }
 
@@ -23,7 +26,12 @@ export interface FeedbackPanelProps {
  * a link to `/docs` where that verification is scored. The verdict is an enum select so the four
  * accepted values are never a guess.
  */
-export function FeedbackPanel({ asset, predictedHealth, modelVersion }: FeedbackPanelProps): JSX.Element {
+export function FeedbackPanel({
+  asset,
+  predictedHealth,
+  predictedPttf,
+  modelVersion,
+}: FeedbackPanelProps): JSX.Element {
   const { ack, submitting, error, submit } = useFeedback();
   const [verdict, setVerdict] = useState<Verdict>("confirmed");
   const [note, setNote] = useState("");
@@ -36,6 +44,7 @@ export function FeedbackPanel({ asset, predictedHealth, modelVersion }: Feedback
       verdict,
       note: note.trim() === "" ? null : note.trim(),
       predicted_health: predictedHealth ?? null,
+      predicted_pttf_hours: predictedPttf ?? null,
       model_version: modelVersion ?? null,
     });
   }

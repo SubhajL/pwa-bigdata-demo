@@ -108,6 +108,15 @@ describe("useDeviceInsight", () => {
     expect(result.current.insight).toBeNull(); // B failed → NOT A's stale data
   });
 
+  it("masks a SPLIT response — both health and rca must match the asset", async () => {
+    mHealth.mockImplementation((a) => Promise.resolve(health(a)));
+    mRca.mockResolvedValue(rca("SOME-OTHER-ASSET")); // rca.asset_id never matches the request
+    const { result } = renderHook(() => useDeviceInsight("P-2"));
+    await act(async () => {});
+    // health matched but rca did not → the insight must be null, not a half-matched mix.
+    expect(result.current.insight).toBeNull();
+  });
+
   it("does not fetch for a null asset", async () => {
     renderHook(() => useDeviceInsight(null));
     await act(async () => {});

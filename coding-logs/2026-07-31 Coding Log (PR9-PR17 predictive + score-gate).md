@@ -166,5 +166,23 @@ No CRITICAL. All fixed/dispositioned; the HIGH is mutation-proven.
   per row (`data-icon`); added full `useDeviceInsight` coverage (A→B / failure / null).
 - Confirmed clean by Codex: one-axis charts, one-hue RCA, StatusChip status, no violet misuse, no raw
   hex/any/@ts-ignore, no orphan/route/label/proxy defect.
-- **Gates after fixes:** typecheck · eslint · **282 tests / 23 files (3× no-flake)** · build. A focused
-  confirming Codex pass was launched on the fixes.
+- **Gates after fixes:** typecheck · eslint · **282 tests / 23 files (3× no-flake)** · build.
+
+#### Review (2026-07-31) — PR-9 frontend — Tier 2 confirming pass (Codex, xhigh)
+Confirmed the **HIGH is closed** (RCA + predicted_health + ack all asset-owned; mask requires both
+response ids; keyed remount prevents A's ack under B; no new defect from mask/remount/LoadedContent).
+Found one follow-up:
+- **MEDIUM — feedback `model_version` not asset-owned.** ACCEPT. It came from the fleet card, not the
+  selected device's prediction. **Fixed:** the screen now passes `model_version` AND `predicted_pttf`
+  from the masked `insight.health` (FeedbackPanel gained a `predictedPttf` prop) — the stored verdict
+  records what THIS device was predicted. (KpiRow's model-version tile keeps the card version — that
+  tile is "the active model", correctly card-derived.)
+- **LOW — test gaps.** ACCEPT the valuable ones: split-ID mask test (health-B/rca-A → masked),
+  ModelCard loading-vs-unavailable copy, DatasetCompare sr-only "อย่างน้อย", KpiRow config-caption,
+  per-ROW status-icon assertions, FeedbackPanel submit→ack-labelled-with-asset_id.
+- No further Codex pass: the MEDIUM fix is a one-line prop-source change (asset-owned insight already
+  mask-tested); verified by typecheck + the new tests. **Gates:** typecheck · eslint · **285 tests**.
+
+**PR-9 CLOSED for review.** Backend + frontend each: Tier 1 + Tier 2 + confirming pass. Adversarial
+review caught two real bugs (dishonest degraded window; cross-asset feedback contamination), both
+fixed with mutation-proven tests. Zero open CRITICAL/HIGH.
