@@ -15,9 +15,8 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "ml"))
 
-from pwa_ml.datasets import build_corpus, manifest, to_csv  # noqa: E402
+from pwa_ml.datasets import CORPUS_SEED, build_corpus, manifest, to_csv  # noqa: E402
 
-CORPUS_SEED = 20260729
 OUT = ROOT / "demo" / "datasets"
 
 

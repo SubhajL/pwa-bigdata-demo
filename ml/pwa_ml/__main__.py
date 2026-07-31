@@ -14,11 +14,12 @@ from __future__ import annotations
 import pathlib
 import sys
 
-from .datasets import build_corpus
+from .datasets import CORPUS_SEED, build_corpus
 from .train import CARD_NAME, train
 
-#: Fixed so the committed card and any rebuild describe the same corpus.
-CORPUS_SEED = 20260729
+#: Re-exported from `datasets` (the canonical home) so existing importers of
+#: `pwa_ml.__main__.CORPUS_SEED` keep working while there is a single source of truth.
+__all__ = ["CORPUS_SEED", "ARTIFACT_DIR", "main"]
 
 ARTIFACT_DIR = pathlib.Path(__file__).resolve().parent.parent / "artifacts"
 

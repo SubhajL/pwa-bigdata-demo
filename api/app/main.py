@@ -26,7 +26,7 @@ from .config import Settings, get_settings
 from .curated import load_curated
 from .db import get_pool
 from .ingest import PipelineStatus, RawMessage
-from .model import get_bundle
+from .model import get_bundle, resolve_model_path
 from .routes import curated as curated_routes
 from .routes import dlq as dlq_routes
 from .routes import pipeline as pipeline_routes
@@ -113,6 +113,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.mqtt_client = None
     app.state.twin_hub = None
     app.state.bundle = None
+    app.state.model_path = None
     app.state.scoring_deps = None
     app.state.curated = None
 
@@ -141,6 +142,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # endpoints without touching the pipeline ones — topic ๑ must not depend on topic ๓.
     bundle = get_bundle(settings.model_path)
     app.state.bundle = bundle
+    # The path the bundle was actually loaded from, so `/api/model` reads the card that
+    # shipped WITH this artifact (scored item 3.1) rather than re-resolving one that a custom
+    # MODEL_PATH could pair with the wrong model. None when no artifact loaded.
+    app.state.model_path = resolve_model_path(settings.model_path) if bundle is not None else None
 
     consumer: asyncio.Task[None] | None = None
     if settings.mqtt_enabled and pool is not None:
