@@ -107,3 +107,64 @@ sound for the Compose deployment). Found issues the FIRST round of fixes introdu
 
 **S9-A CLOSED.** Two QCHECK tiers + one confirming pass; all findings fixed & dispositioned;
 zero open CRITICAL/HIGH. Honest A/B: healthy 99.5/normal(oor) vs degraded 30.1/critical.
+Committed checkpoint `6b08b84`.
+
+### 2026-07-31 · S9-B/C/D/E — predictive feature module + screen (Claude, inline)
+- **Stop line:** Claude-implemented inline (honesty-critical UI: P0 SIMULATED/token discipline
+  where a weak delegate is high-risk; the acceptance tests are Claude's regardless). TDD throughout.
+- **S9-B** `features/predictive/`: `types.ts` (mirrors verified backend JSON), `predictive.config.ts`
+  (cadence, thresholds mirroring ml constants, verdicts, signal labels), `predictiveClient.ts`
+  (fetchers + pure reducers `kpiFromWorklist`/`rcaBars`/`pttfDays`/`healthBand`). T9.4: 9 tests,
+  mutation-verified (broke `atRisk` → fail).
+- **S9-C** hooks `useWorklist`/`useDeviceInsight`/`useModelCard`/`useFeedback` — reuse the pipeline's
+  generation-owned `useOwnedPoll`/`useOwnedAsync` (reimplementing that concurrency-hard logic would
+  be a bug risk). T9.6: 5 tests (stale-keeps-items, ack, 404 detail, fetch-once).
+- **S9-D** components: `HealthMeter` (one-axis), `KpiRow`, `WorklistTable` (StatusChip + keyboard
+  asset button), `RcaPanel` (one-hue bars), `ModelCard` (REAL Ridge/params/MAE — mockup's Random
+  Forest is fabricated), `DatasetCompare` (honest A/B + `≥` on censored PTTF), `FeedbackPanel`
+  (real POST → persisted ack + Swagger link). T9.5: 7 component tests.
+- **S9-E** `PredictiveAnalyticsScreen` (sync heading, five INTERACTIONS states) + registered in
+  `routes.tsx` SCREENS + `nav.ts` built:true + `/docs`,`/openapi.json`,`/redoc` added to the Vite
+  proxy (Swagger link, item 3.4). T9.7 (sync heading/error), T9.8 (wiring). Reworded the error
+  AlertTitle to avoid the labelTh substring "การพยากรณ์" (AlertTitle is a heading; would collide
+  with the DO-NOT-TOUCH router.test's `getByRole heading` matcher).
+- **Gates:** typecheck clean · eslint clean · **278 tests / 23 files pass** (incl. router.test +
+  a11y now exercising /predictive) · build succeeds. 25 new predictive tests.
+- **QCHECK (Claude-authored → Tier 1 g2-check + Tier 2 Codex xhigh):** Tier 1 done (findings: two
+  LOW — screen/FeedbackPanel >50 lines matching the accepted PipelineMonitorScreen pattern; stale
+  selection edge — neither fixed). Tier 2 running on the frontend diff.
+- **Visual/dataviz "render & look":** deferred to PR-17's Playwright screenshots of the live stack
+  (the screen needs the real API for data; component tests + eslint token rule + tokens.test cover
+  structure/tokens now).
+
+#### Review (2026-07-31) — PR-9 frontend — Tier 2 (Codex gpt-5.6-sol, xhigh) — findings & dispositions
+No CRITICAL. All fixed/dispositioned; the HIGH is mutation-proven.
+- **HIGH — cross-asset data contamination.** ACCEPT (real bug). On an A→B selection change,
+  `useDeviceInsight` (via the shared `useOwnedAsync`) keeps A's data until B settles, and the screen
+  discarded loading/stale — so A's RCA rendered under B's header and **A's health was submitted as
+  B's feedback**; a failed B left the mismatch indefinitely. **Fix:** mask the insight by the
+  response's own `asset_id` (`useDeviceInsight.ts`) → a mismatch resolves to null (empty panel), never
+  the wrong asset. Regression tests: A→B masks, B-failure stays empty, null-asset no-fetch —
+  mutation-proven (remove the mask → both contamination tests fail).
+- **MEDIUM — empty worklist → permanent skeleton.** ACCEPT. Screen now distinguishes initial-loading
+  (`lastAt==null` → skeleton) from loaded-empty (→ honest `predictive-empty` state). Test added.
+- **MEDIUM — feedback ack not asset-owned.** ACCEPT. `key={selected}` on FeedbackPanel resets ack on
+  device change; ack now shows `asset_id`. (Covered by the key remount + the asset_id display.)
+- **MEDIUM — model loading vs failure collapsed.** ACCEPT. `useModelCard.loading` threaded into
+  `ModelCard` → "กำลังโหลด…" while loading vs "ไม่พบ…" on outage.
+- **MEDIUM — a11y: `≥` hidden from screen readers.** ACCEPT. DatasetCompare adds an sr-only
+  "อย่างน้อย" so assistive tech hears "at least" rather than an exact value.
+- **LOW — KpiRow hardcoded "Health < 65".** ACCEPT. Derived from `PREDICTIVE_CONFIG.healthWarningBelow`.
+- **LOW — NaN handling in reducers.** REJECT with reason: compliant JSON cannot carry NaN and the
+  backend emits finite floats (pydantic); guarding would be dead code. (Codex itself rated LOW/"cannot
+  carry NaN".)
+- **LOW — function length (FeedbackPanel, screen).** Screen split into `LoadedContent` (main fn now
+  ~45 lines); FeedbackPanel (~78) left as the accepted screen/form-composition pattern
+  (PipelineMonitorScreen is 77).
+- **LOW — vacuous tests.** ACCEPT. Tightened: RCA asserts one `listitem` per contribution; KPI asserts
+  exactly 3 SIMULATED badges + none on the metadata tile; Worklist asserts a distinct StatusChip icon
+  per row (`data-icon`); added full `useDeviceInsight` coverage (A→B / failure / null).
+- Confirmed clean by Codex: one-axis charts, one-hue RCA, StatusChip status, no violet misuse, no raw
+  hex/any/@ts-ignore, no orphan/route/label/proxy defect.
+- **Gates after fixes:** typecheck · eslint · **282 tests / 23 files (3× no-flake)** · build. A focused
+  confirming Codex pass was launched on the fixes.

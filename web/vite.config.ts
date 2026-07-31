@@ -36,6 +36,11 @@ export default defineConfig({
       // `ws: true` is what makes the twin socket (scored item 2.2) upgrade rather than
       // being served as a failed HTTP request.
       "/ws": { target: PROXY_TARGET, changeOrigin: true, ws: true },
+      // Swagger UI (scored item 3.4) and its spec, so the predictive panel's "เปิด Swagger"
+      // link reaches FastAPI from the web origin rather than 404ing against Vite.
+      "/docs": { target: PROXY_TARGET, changeOrigin: true },
+      "/openapi.json": { target: PROXY_TARGET, changeOrigin: true },
+      "/redoc": { target: PROXY_TARGET, changeOrigin: true },
     },
   },
   test: { environment: "jsdom", globals: true, setupFiles: ["./src/test-setup.ts"] },
