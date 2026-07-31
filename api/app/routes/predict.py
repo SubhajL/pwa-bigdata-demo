@@ -14,7 +14,9 @@ Every value returned is SIMULATED, model outputs included.
 """
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import cast
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -24,15 +26,21 @@ from ..db import query_range
 from ..features import WINDOW_HOURS, build_window
 from ..health_store import insert_feedback, is_known_asset
 from ..health_store import worklist as health_worklist
+from ..model import read_model_card, score_demo_datasets
 from ..models import (
+    EstimatorCard,
     FeedbackAck,
     FeedbackRequest,
     HealthResponse,
+    MetricPair,
+    ModelCardResponse,
     RcaResponse,
     Signal,
     SignalContribution,
     WorklistItem,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["predictive"])
 
@@ -223,3 +231,70 @@ def root_cause(request: Request, asset_id: str) -> RcaResponse:
             for c in score.contributions
         ],
     )
+
+
+@router.get(
+    "/model",
+    response_model=ModelCardResponse,
+    summary="Trained-model card + two-dataset Health/PTTF comparison (items 3.1/3.2)",
+)
+def model_card(request: Request) -> ModelCardResponse:
+    """The card that shipped with the loaded artifact, plus the two reserved demo datasets
+    scored through it.
+
+    Items 3.1 and 3.2 are read here: algorithm, parameters and held-out error come from
+    `model_card.json`; the healthy-vs-degraded scores are computed live through the SAME
+    `Bundle` the rest of topic ๓ uses, so the A/B a judge sees is the model's own. The two
+    demo runs are scored at IN-DOMAIN windows (see `app.model._demo_window`). All SIMULATED.
+
+    Raises:
+        HTTPException: 503 when no artifact is loaded, the card is missing/invalid, or the
+            card's `model_version` does not match the loaded model — a card describing a
+            different model must never be served as if it described this one.
+    """
+    bundle = getattr(request.app.state, "bundle", None)
+    model_path = getattr(request.app.state, "model_path", None)
+    if bundle is None or model_path is None:
+        raise HTTPException(status_code=503, detail="model artifact not available")
+
+    try:
+        card = read_model_card(Path(model_path).parent)
+    except (OSError, ValueError):
+        # OSError (not just FileNotFoundError) so a permissions/IO fault degrades to 503 like
+        # every other unavailable-dependency path here, rather than surfacing as a 500.
+        logger.exception("model card unreadable at %s", model_path)
+        raise HTTPException(status_code=503, detail="model card unavailable") from None
+
+    if card.get("model_version") != bundle.model_version:
+        logger.error(
+            "model card version %r does not match loaded model %r",
+            card.get("model_version"), bundle.model_version,
+        )
+        raise HTTPException(status_code=503, detail="model card does not match loaded model")
+
+    try:
+        # A card must describe BOTH estimators (item 3.1); an empty/partial pipelines would
+        # otherwise serve a 200 with nothing in it. `set()` on a non-mapping value (e.g.
+        # `pipelines: 7`) raises TypeError here — INSIDE the try, so it 503s rather than 500s.
+        required = {"health", "pttf"}
+        has_estimators = required <= set(card.get("pipelines") or {})
+        has_metrics = required <= set(card.get("metrics") or {})
+        if not (has_estimators and has_metrics):
+            logger.error("model card at %s is missing the health/pttf estimators", model_path)
+            raise HTTPException(status_code=503, detail="model card incomplete")
+        return ModelCardResponse(
+            model_version=card["model_version"],
+            pipelines={k: EstimatorCard(**v) for k, v in card["pipelines"].items()},
+            metrics={k: MetricPair(**v) for k, v in card["metrics"].items()},
+            data_sha256=card["data_sha256"],
+            created_from=card.get("created_from", {}),
+            censoring=card.get("censoring", {}),
+            limitations=card.get("limitations", []),
+            datasets=score_demo_datasets(bundle, cache_key=str(model_path)),
+        )
+    except (KeyError, TypeError, ValueError, AttributeError):
+        # ValueError covers pydantic ValidationError (its subclass) from a malformed card
+        # sub-object; AttributeError covers a wrong container type (e.g. `pipelines` a list).
+        # A corrupt card must 503, not 500.
+        logger.exception("model card at %s is missing or malformed fields", model_path)
+        raise HTTPException(status_code=503, detail="model card malformed") from None

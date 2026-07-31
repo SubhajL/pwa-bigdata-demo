@@ -35,6 +35,12 @@ FAILURE_THRESHOLD = 30.0
 #: Observation horizon. A run still healthy at this point is CENSORED, not failed.
 HORIZON_HOURS = 720
 
+#: The corpus seed that produced the COMMITTED artifact and card. Fixed so the model, its
+#: card and the reserved demo pair all describe the same corpus. Canonical home: the two
+#: build scripts and the API's `/api/model` all import THIS, so the reserved lifecycles a
+#: judge sees scored are the exact ones the model was trained to exclude.
+CORPUS_SEED = 20260729
+
 
 @dataclass(frozen=True)
 class Window:

@@ -11,6 +11,8 @@ tests about the response a judge sees rather than about a lifespan.
 """
 from __future__ import annotations
 
+import json
+import pathlib
 from datetime import UTC, datetime
 
 import pytest
@@ -18,12 +20,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
-from app.model import get_bundle
+from app.model import get_bundle, read_model_card, resolve_model_path
 from app.routes import predict as predict_routes
 from app.scoring import ScoringDeps, score_all
 
 FEEDBACK_PATH = "/api/feedback"
 WORKLIST_PATH = "/api/worklist"
+MODEL_PATH = "/api/model"
 
 
 def _probe(pool: ConnectionPool | None) -> FastAPI:
@@ -31,6 +34,9 @@ def _probe(pool: ConnectionPool | None) -> FastAPI:
     probe.include_router(predict_routes.router)
     probe.state.pool = pool
     probe.state.bundle = get_bundle("")
+    # /api/model reads the card from the sibling of the RESOLVED artifact, exactly as the
+    # real lifespan stashes it — wiring it here keeps card↔model parity in the test too.
+    probe.state.model_path = resolve_model_path("")
     return probe
 
 
@@ -282,3 +288,191 @@ def test_the_verdict_check_constraint_matches_the_pydantic_literal(
         assert f"'{verdict}'" in definition, (
             f"{verdict!r} is accepted by the API but not by the feedback CHECK constraint"
         )
+
+
+# ── items 3.1 / 3.2: the trained-model card and the two-dataset comparison (S9-A) ──────
+#
+# `GET /api/model` is the on-screen source for item 3.1 (algorithm + params) and item 3.2
+# (Health/PTTF differ across two datasets). It reads the card that shipped WITH the loaded
+# artifact and scores the two RESERVED demo lifecycles through that same artifact — the
+# exact windows the canonical `ml/tests/test_model.py::test_health_and_pttf_separate_...`
+# uses, so what a judge reads here is the model's blessed A/B, not a second implementation.
+
+#: The reserved demo lifecycle ids (committed in `demo/datasets/manifest.json`). Asserting
+#: them proves the endpoint scored the reserved pair, not two arbitrary devices.
+RESERVED_HEALTHY = "lc-20260729-000"
+RESERVED_DEGRADED = "lc-20260729-009"
+
+
+def test_model_endpoint_is_registered_and_documented() -> None:
+    """Registration is the wiring failure this project keeps guarding against (item 3.1)."""
+    from app.main import app
+
+    with TestClient(app) as client:
+        spec = client.get("/openapi.json").json()
+
+    assert MODEL_PATH in spec["paths"], "GET /api/model is not registered"
+    operation = spec["paths"][MODEL_PATH]["get"]
+    assert operation["summary"], "the endpoint needs a summary; /docs shows it in the list"
+    body_ref = operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
+    assert body_ref.rsplit("/", 1)[-1] == "ModelCardResponse"
+
+
+def test_model_endpoint_serves_the_card_and_two_separating_datasets(
+    model_artifact: object,
+) -> None:
+    """Item 3.1 card + item 3.2 A/B, scored through the SHIPPED artifact.
+
+    The separation floor mirrors `test_model.py`: a bare `>` would pass for an epsilon
+    scorer that tells an operator nothing. No database — `/api/model` scores in memory.
+    """
+    with TestClient(_probe(None)) as client:
+        resp = client.get(MODEL_PATH)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    # item 3.1 — the trained model, its algorithm and parameters — BOTH estimators, not just one
+    assert body["model_version"] == "pwa-health-pttf-v1"
+    for target in ("health", "pttf"):
+        assert body["pipelines"][target]["estimator_class"] == "Ridge"
+        assert body["pipelines"][target]["preprocessing"] == ["StandardScaler"]
+        assert body["metrics"][target]["model_mae"] < body["metrics"][target]["baseline_mae"], (
+            f"the {target} model does not beat its baseline — the card's evidence is empty"
+        )
+    assert body["pipelines"]["health"]["hyperparameters"]["alpha"] == 1.0
+    assert body["data_sha256"], "the card must record the training-data hash"
+    assert body["simulated"] is True
+
+    # item 3.2 — Health and PTTF differ materially between a healthy and a degraded dataset
+    datasets = {d["name"]: d for d in body["datasets"]}
+    assert set(datasets) == {"healthy", "degraded"}
+    healthy, degraded = datasets["healthy"], datasets["degraded"]
+    assert healthy["lifecycle_id"] == RESERVED_HEALTHY
+    assert degraded["lifecycle_id"] == RESERVED_DEGRADED
+    # The healthy device reads healthy; the degraded device reads degraded — not merely a
+    # numeric gap, but the right SIDE of the bands (a device about to fail is warning/critical).
+    assert healthy["status"] == "normal"
+    assert degraded["status"] in ("warning", "critical")
+    # HONESTY: the degraded device is scored at an IN-DOMAIN pre-failure window (a device about
+    # to fail, retaining some health), NOT a post-failure window the model never trained on
+    # (which saturates to exactly 0). A degraded score of 0.0 here means the window is wrong.
+    assert degraded["health_score"] > 0.0, (
+        "degraded health saturated to 0 — scored a post-failure, out-of-training-domain window "
+        "instead of the honest last-window-before-failure"
+    )
+    assert healthy["health_score"] - degraded["health_score"] >= 15.0, (
+        f"health barely moved between healthy and degraded "
+        f"({healthy['health_score']:.1f} vs {degraded['health_score']:.1f}) — an epsilon "
+        "difference satisfies a bare `>` while telling an operator nothing"
+    )
+    # STRICT: identical PTTF on two different-health devices would be a broken PTTF head.
+    assert healthy["pttf_hours"] > degraded["pttf_hours"]
+    # The extrapolation flag is SURFACED, not dropped: a censored healthy run's PTTF is
+    # "at least this long", and hiding that would present an out-of-range value as exact.
+    assert healthy["pttf_out_of_range"] is True
+    assert degraded["pttf_out_of_range"] is False
+
+
+def test_model_endpoint_503_when_the_card_does_not_match_the_loaded_model(
+    model_artifact: object, tmp_path: pathlib.Path
+) -> None:
+    """Card↔model parity: a card whose `model_version` differs from the loaded bundle must
+    NOT be served as if it described that model (Codex H1).
+
+    The card is the REAL, otherwise-complete card with ONLY its version changed, so the parity
+    check is the sole reason for the 503 — remove that check and this 200s (non-vacuous).
+    """
+    artifact = resolve_model_path("")
+    assert artifact is not None, "the model_artifact fixture guarantees a resolvable artifact"
+    card = read_model_card(artifact.parent)
+    card["model_version"] = "SOME-OTHER-MODEL"
+    (tmp_path / "model_card.json").write_text(json.dumps(card), encoding="utf-8")
+    probe = _probe(None)
+    probe.state.model_path = tmp_path / "model.pkl"  # sibling card is the mismatched one
+
+    with TestClient(probe) as client:
+        assert client.get(MODEL_PATH).status_code == 503
+
+
+@pytest.mark.parametrize(
+    "bad_card",
+    [
+        pytest.param("not-a-json-object", id="json-scalar"),
+        pytest.param(
+            {
+                "model_version": "pwa-health-pttf-v1",
+                "pipelines": {},
+                "metrics": {},
+                "data_sha256": "",
+            },
+            id="empty-estimators",
+        ),
+        pytest.param(
+            # `set(7)` in the completeness guard raises TypeError — must 503, not 500.
+            {
+                "model_version": "pwa-health-pttf-v1",
+                "pipelines": 7,
+                "metrics": {},
+                "data_sha256": "",
+            },
+            id="pipelines-not-a-mapping",
+        ),
+    ],
+)
+def test_model_endpoint_503_on_a_structurally_broken_card(
+    model_artifact: object, tmp_path: pathlib.Path, bad_card: object
+) -> None:
+    """Structural corruption degrades to 503, never 500 or an empty 200: a non-object card
+    (would AttributeError on `.get`), and a right-version card with no estimators (would serve
+    an empty 200) both fail closed (Codex MEDIUM 503-isolation)."""
+    (tmp_path / "model_card.json").write_text(json.dumps(bad_card), encoding="utf-8")
+    probe = _probe(None)
+    probe.state.model_path = tmp_path / "model.pkl"
+
+    with TestClient(probe) as client:
+        assert client.get(MODEL_PATH).status_code == 503
+
+
+def test_model_endpoint_503_on_a_structurally_malformed_card(
+    model_artifact: object, tmp_path: pathlib.Path
+) -> None:
+    """A card that reaches the pydantic build with a malformed sub-object degrades to 503.
+
+    It matches the bundle version (passes parity) AND names both estimators + metrics (passes
+    the completeness guard), so control reaches `EstimatorCard(**{"target": "x"})`, which is
+    missing `estimator_class` and raises a pydantic `ValidationError`. The handler must catch
+    it and report 503 — not surface a 500. (Distinct from the guard-short-circuit cases above.)
+    """
+    (tmp_path / "model_card.json").write_text(
+        json.dumps(
+            {
+                "model_version": "pwa-health-pttf-v1",  # matches the bundle → passes parity
+                # both estimators present (passes completeness) but each missing estimator_class
+                "pipelines": {"health": {"target": "x"}, "pttf": {"target": "y"}},
+                "metrics": {
+                    "health": {"model_mae": 0.1, "baseline_mae": 1.0},
+                    "pttf": {"model_mae": 0.2, "baseline_mae": 1.0},
+                },
+                "data_sha256": "abc123",
+            }
+        ),
+        encoding="utf-8",
+    )
+    probe = _probe(None)
+    probe.state.model_path = tmp_path / "model.pkl"
+
+    with TestClient(probe) as client:
+        assert client.get(MODEL_PATH).status_code == 503
+
+
+def test_model_endpoint_says_so_when_there_is_no_model() -> None:
+    """No artifact loaded → 503, never a crash and never a fabricated card (item 3.1)."""
+    probe = FastAPI()
+    probe.include_router(predict_routes.router)
+    probe.state.pool = None
+    probe.state.bundle = None
+    probe.state.model_path = None
+
+    with TestClient(probe) as client:
+        assert client.get(MODEL_PATH).status_code == 503

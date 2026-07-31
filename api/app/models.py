@@ -180,6 +180,69 @@ class RcaResponse(BaseModel):
     detail: str | None = None
 
 
+# ── model card + two-dataset comparison (slice S9-A, scored items 3.1 / 3.2) ────────────
+#
+# `GET /api/model` is the on-screen source for item 3.1 (the trained model, its algorithm
+# and parameters) and item 3.2 (Health/PTTF differ across ≥2 datasets). The card fields
+# come from the `model_card.json` that shipped WITH the loaded artifact; the two datasets
+# are scored through that same artifact. Every value is SIMULATED — the model was fitted on
+# generated lifecycles.
+
+
+class EstimatorCard(BaseModel):
+    """One fitted estimator's public description (item 3.1)."""
+
+    estimator_class: str
+    #: Serialisable `get_params()` of the fitted estimator, as recorded in the card.
+    hyperparameters: dict[str, Any]
+    target: str
+    units: str
+    preprocessing: list[str] = Field(default_factory=list)
+
+
+class MetricPair(BaseModel):
+    """Held-out error of the model against a dummy baseline (item 3.1/3.2 evidence)."""
+
+    model_mae: float
+    baseline_mae: float
+
+
+class DatasetScore(BaseModel):
+    """Health and PTTF for one reserved demo lifecycle, scored through the shipped artifact.
+
+    `name` is `healthy` or `degraded`. That these two differ materially is scored item 3.2.
+    The two are scored at IN-DOMAIN windows: the healthy (censored) run at its first window,
+    the failing run at its last window ending BEFORE failure — the model's honest view of a
+    device about to fail, not a post-failure saturation the model was never trained on.
+    """
+
+    name: str
+    lifecycle_id: str
+    health_score: float
+    pttf_hours: float
+    #: True when PTTF sits at the top of the range the model was trained on, so it must be
+    #: read as "at least this long" — surfaced (not dropped) so a large PTTF is not presented
+    #: as an exact estimate. A healthy demo device is censored, so this is normally True for it.
+    pttf_out_of_range: bool
+    status: TwinStatus
+
+
+class ModelCardResponse(BaseModel):
+    """The trained-model card + the two-dataset comparison (scored items 3.1 and 3.2)."""
+
+    model_version: str
+    #: Keyed by target (`health`, `pttf`).
+    pipelines: dict[str, EstimatorCard]
+    metrics: dict[str, MetricPair]
+    data_sha256: str
+    created_from: dict[str, int] = Field(default_factory=dict)
+    censoring: dict[str, Any] = Field(default_factory=dict)
+    limitations: list[str] = Field(default_factory=list)
+    #: [healthy, degraded], scored live through the loaded artifact (item 3.2).
+    datasets: list[DatasetScore] = Field(default_factory=list)
+    simulated: bool = True
+
+
 # ── curated real data (PR-6, ผนวก ๕/๖ role dashboards) ─────────────────────────────────
 #
 # These are the ONLY values in this API that are not simulated. They come from
