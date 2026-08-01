@@ -174,6 +174,28 @@ def test_zero_volume_branch_is_listed_and_ranked(tmp_path: pathlib.Path) -> None
     assert "F006" not in codes
 
 
+def test_negative_volume_row_is_quarantined_not_ingested(tmp_path: pathlib.Path) -> None:
+    """Water sold cannot be negative; such a row is quarantined (counted), never rolled up.
+
+    A negative volume that reached `national()`/`region()` would poison a KPI total and, downstream,
+    a bar width and a map fill (both of which assume a non-negative magnitude). Reject it at the
+    door like a NaN, and keep the count so a future bad row is visible rather than silent.
+    """
+    csv = _write_csv(
+        tmp_path / "c.csv",
+        [
+            "1,G007,ตราด,สาขา G,2023-01-01,10.0",
+            "1,H008,ตราด,สาขา H,2023-01-01,-5.0",  # impossible → quarantined
+        ],
+    )
+    store = load_curated(csv)
+    assert store.skipped_rows == 1
+    codes = [r.branch_code for r in store.region(1, "2023-01")]
+    assert codes == ["G007"]
+    assert "H008" not in codes
+    assert store.national("2023-01").total_m3 == pytest.approx(10.0)
+
+
 def test_rank_is_stored_over_the_default_sort(store: CuratedStore) -> None:
     rows = store.region(2, LAST_MONTH)
     assert rows, "region 2 must have branches in the last month"
@@ -377,3 +399,64 @@ def test_curated_routes_return_503_when_the_dataset_is_not_mounted(
     with TestClient(app) as unmounted:
         assert unmounted.get("/healthz").status_code == 200
         assert unmounted.get("/api/curated/months").status_code == 503
+
+
+# ── PR-10: national monthly series (one call powering the trend + national MoM/YoY) ───────
+
+
+def test_national_series_has_one_point_per_month_ascending(store: CuratedStore) -> None:
+    """The series is exactly the months, in order — nothing dropped, nothing invented."""
+    series = store.national_series()
+    months = [p.month for p in series.points]
+    assert len(months) == EXPECTED_MONTHS
+    assert months == store.months()
+    assert months == sorted(months)
+
+
+def test_national_series_agrees_with_the_national_rollup_each_month(store: CuratedStore) -> None:
+    """Each point must equal the authoritative national() rollup for that month.
+
+    Asserting only the December total would let a mid-series month drift silently; this pins
+    EVERY month's total and distinct-branch count to the single-month endpoint they must match.
+    """
+    series = store.national_series()
+    for point in series.points:
+        rollup = store.national(point.month)
+        assert point.total_m3 == pytest.approx(rollup.total_m3, rel=1e-9)
+        assert point.branch_count == rollup.branch_count
+
+
+def test_national_series_anchors_on_the_real_december_total(store: CuratedStore) -> None:
+    """External anchor: the last point is the headline figure from the Stitch mockup."""
+    series = store.national_series()
+    december = series.points[-1]
+    assert december.month == LAST_MONTH
+    assert december.total_m3 == pytest.approx(LAST_MONTH_TOTAL_M3, rel=1e-9)
+    assert december.branch_count == EXPECTED_BRANCH_CODES
+
+
+def test_national_series_route_shape(client: TestClient) -> None:
+    with client:
+        response = client.get("/api/curated/national/series")
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {"points"}
+    assert len(body["points"]) == EXPECTED_MONTHS
+    assert set(body["points"][0]) == {"month", "total_m3", "branch_count"}
+    assert body["points"][-1]["month"] == LAST_MONTH
+    assert body["points"][-1]["total_m3"] == pytest.approx(LAST_MONTH_TOTAL_M3, rel=1e-9)
+
+
+def test_national_series_route_in_openapi_and_503_when_unmounted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The new real route is documented and degrades to 503 like its siblings."""
+    monkeypatch.setenv("CURATED_PATH", "")
+    monkeypatch.setenv("MQTT_ENABLED", "0")
+    monkeypatch.setenv("SCORING_ENABLED", "0")
+    from app.main import app
+
+    with TestClient(app) as unmounted:
+        schema = unmounted.get("/openapi.json").json()
+        assert "/api/curated/national/series" in schema["paths"]
+        assert unmounted.get("/api/curated/national/series").status_code == 503

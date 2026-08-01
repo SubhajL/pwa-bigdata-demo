@@ -33,7 +33,15 @@ from collections import defaultdict
 from datetime import date
 from pathlib import Path
 
-from .models import BranchRow, BranchSeries, RegionRollup, RegionTotal, SeriesPoint
+from .models import (
+    BranchRow,
+    BranchSeries,
+    NationalSeries,
+    NationalSeriesPoint,
+    RegionRollup,
+    RegionTotal,
+    SeriesPoint,
+)
 
 #: Columns the loader requires. A missing one is a structural defect, not a data defect.
 REQUIRED_COLUMNS = ("region", "branch_code", "province", "branch", "month", "water_sold_m3")
@@ -167,6 +175,29 @@ class CuratedStore:
             branch_count=len(seen_codes),
             regions=regions,
         )
+
+    def national_series(self) -> NationalSeries:
+        """Every month's national total and distinct-branch count, ascending.
+
+        One pass over the data accumulates per-month totals and distinct branch_codes, so the
+        result agrees point-for-point with `national(month)` without calling it 39 times. Months
+        are taken from `self._months` (already sorted), so the series is ordered and complete.
+        """
+        totals: dict[str, float] = defaultdict(float)
+        codes: dict[str, set[str]] = defaultdict(set)
+        for (code, month), (_region, _province, _branch, vol) in self._data.items():
+            totals[month] += vol
+            codes[month].add(code)
+
+        points = [
+            NationalSeriesPoint(
+                month=month,
+                total_m3=round(totals[month], 6),
+                branch_count=len(codes[month]),
+            )
+            for month in self._months
+        ]
+        return NationalSeries(points=points)
 
     def region(self, region: int, month: str) -> list[BranchRow]:
         """One region's branch league table for one month.
@@ -328,14 +359,16 @@ def load_curated(path: str | Path) -> CuratedStore:
             except ValueError:
                 raise ValueError(f"row {row_num}: unparseable month {month_raw!r}") from None
 
-            # Volume: parse, but skip if unparseable or non-finite.
+            # Volume: parse, but skip if unparseable, non-finite, or NEGATIVE. Water sold cannot be
+            # negative; a negative row is a data defect that would poison a roll-up, a bar width and
+            # a map fill downstream, so quarantine it (counted, never fatal) exactly like a NaN.
             volume_raw = row["water_sold_m3"].strip()
             try:
                 volume = float(volume_raw)
             except ValueError:
                 store.skipped_rows += 1
                 continue
-            if not math.isfinite(volume):
+            if not math.isfinite(volume) or volume < 0:
                 store.skipped_rows += 1
                 continue
 
