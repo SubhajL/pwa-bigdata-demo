@@ -1,5 +1,5 @@
 import { WifiOff } from "lucide-react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 
 import { MonthPicker } from "@/components/MonthPicker";
 import { SimulatedBadge } from "@/components/SimulatedBadge";
@@ -11,6 +11,7 @@ import { BranchLeagueTable } from "@/features/regional/BranchLeagueTable";
 import { RegionBranchNrwChart, RegionStepTestCard } from "@/features/regional/RegionDetailPanels";
 import { RegionBreadcrumb } from "@/features/regional/RegionBreadcrumb";
 import { RegionOfficeMap } from "@/features/regional/RegionOfficeMap";
+import { RegionSelect } from "@/features/regional/RegionSelect";
 import { RegionalKpiRow } from "@/features/regional/RegionalKpiRow";
 import { REGIONAL_CONFIG } from "@/features/regional/regional.config";
 import { branchBars, regionSummary } from "@/features/regional/regionalClient";
@@ -32,7 +33,9 @@ function parseRegion(raw: string | null): number | null {
  */
 export function RegionalScreen(): JSX.Element {
   const [params, setParams] = useSearchParams();
-  const region = parseRegion(params.get("region"));
+  // Reached straight from the sidebar there is no `?region=`; fall back to a default so the page
+  // lands on a real region dashboard (with a เขต selector to switch) instead of an empty prompt.
+  const region = parseRegion(params.get("region")) ?? REGIONAL_CONFIG.defaultRegion;
   const requestedMonth = params.get("month");
   const { data, error, stale } = useRegional(region, requestedMonth);
   // `loaded` requires the data to be FOR the selected region: during a region switch `useOwnedAsync`
@@ -50,13 +53,18 @@ export function RegionalScreen(): JSX.Element {
     });
   };
 
+  const setRegion = (next: number): void => {
+    setParams((prev) => {
+      prev.set("region", String(next));
+      return prev;
+    });
+  };
+
   return (
     <div className="flex flex-col gap-4" data-testid="regional">
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="text-2xl font-semibold text-on-surface">
-          ระดับเขต{region != null ? ` · เขต ${region}` : ""}
-        </h1>
-        <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className="text-2xl font-semibold text-on-surface">ระดับเขต · เขต {region}</h1>
+        <div className="flex flex-wrap items-center gap-4">
           {switching && (
             <span className="text-dense text-on-surface-variant" aria-live="polite">
               กำลังโหลดเดือนที่เลือก…
@@ -67,7 +75,8 @@ export function RegionalScreen(): JSX.Element {
               <WifiOff className="h-4 w-4" aria-hidden="true" /> ข้อมูลไม่เป็นปัจจุบัน
             </span>
           )}
-          {region != null && loaded && (
+          <RegionSelect region={region} onChange={setRegion} />
+          {loaded && (
             <MonthPicker
               months={data.months}
               value={monthKnown ? requestedMonth : data.month}
@@ -81,8 +90,8 @@ export function RegionalScreen(): JSX.Element {
   );
 }
 
-/** The state ladder: no-region prompt / error / skeleton / empty / loaded. Kept out of the screen
- *  function so each stays legible and short. */
+/** The state ladder: error / skeleton / empty / loaded. Kept out of the screen function so each
+ *  stays legible and short. (There is no "no region" state — the screen always defaults one.) */
 function RegionalBody({
   region,
   data,
@@ -91,24 +100,13 @@ function RegionalBody({
   stale,
   switching,
 }: {
-  readonly region: number | null;
+  readonly region: number;
   readonly data: RegionalData | null;
   readonly loaded: boolean;
   readonly error: string | null;
   readonly stale: boolean;
   readonly switching: boolean;
 }): JSX.Element {
-  if (region == null) {
-    return (
-      <Card data-testid="regional-no-region" className="text-dense text-on-surface-variant">
-        เลือกเขตจากหน้า{" "}
-        <Link to="/national" className="text-primary hover:underline">
-          ภาพรวมประเทศ
-        </Link>{" "}
-        เพื่อดูรายละเอียดรายสาขา
-      </Card>
-    );
-  }
   if (error != null && !loaded) {
     return (
       <Alert variant="error">

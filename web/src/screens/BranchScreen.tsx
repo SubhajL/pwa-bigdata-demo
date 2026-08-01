@@ -1,15 +1,15 @@
 import { WifiOff } from "lucide-react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 
 import { MonthPicker } from "@/components/MonthPicker";
 import { SimulatedBadge } from "@/components/SimulatedBadge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BranchAiCard } from "@/features/branch/BranchAiCard";
 import { BranchBreadcrumb } from "@/features/branch/BranchBreadcrumb";
 import { BranchForecastCard, BranchPeerCard, BranchProductionCard } from "@/features/branch/BranchDetailPanels";
 import { BranchKpiRow } from "@/features/branch/BranchKpiRow";
+import { BranchPicker } from "@/features/branch/BranchPicker";
 import { BranchTrendChart } from "@/features/branch/BranchTrendChart";
 import { useBranch, type BranchData } from "@/features/branch/useBranch";
 
@@ -78,13 +78,10 @@ function BranchBody({
   readonly stale: boolean;
   readonly switching: boolean;
 }): JSX.Element {
+  // Reached without a `?branch=` (e.g. straight from the sidebar) → offer an inline picker instead of
+  // an empty "go to the national page" prompt.
   if (code == null) {
-    return (
-      <Card data-testid="branch-no-branch" className="text-dense text-on-surface-variant">
-        เลือกสาขาจากตารางในหน้า{" "}
-        <Link to="/national" className="text-primary hover:underline">ภาพรวมประเทศ</Link> เพื่อดูรายละเอียดรายสาขา
-      </Card>
-    );
+    return <BranchPicker />;
   }
   if (error != null && !loaded) {
     return (
