@@ -19,6 +19,7 @@ import { PipelineMonitorScreen } from "@/screens/PipelineMonitorScreen";
 import { PlaceholderScreen } from "@/screens/PlaceholderScreen";
 import { PredictiveAnalyticsScreen } from "@/screens/PredictiveAnalyticsScreen";
 import { RegionalScreen } from "@/screens/RegionalScreen";
+import { ReportCenterScreen } from "@/screens/ReportCenterScreen";
 import { SystemAdminScreen } from "@/screens/SystemAdminScreen";
 import { NAV_ITEMS, type NavItem } from "@/routes/nav";
 
@@ -35,6 +36,7 @@ const SCREENS: Readonly<Record<string, ComponentType>> = {
   pipeline: PipelineMonitorScreen,
   predictive: PredictiveAnalyticsScreen,
   admin: SystemAdminScreen,
+  reports: ReportCenterScreen,
 };
 
 /**
