@@ -55,7 +55,9 @@ export function AppShell(): JSX.Element {
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-outline-variant bg-surface-container-lowest px-6">
           <div className="flex items-center gap-3" />
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm">
+            {/* Export = the browser's print-to-PDF of the current view. A real, honest action (Path D,
+                PR-D2) — no inert chrome; nothing is fabricated, the user gets exactly what is on screen. */}
+            <Button variant="outline" size="sm" onClick={() => window.print()}>
               <Download className="h-4 w-4" aria-hidden="true" />
               ส่งออกรายงาน
             </Button>

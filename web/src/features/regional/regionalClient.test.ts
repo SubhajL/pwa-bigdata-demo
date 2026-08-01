@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import { REGIONAL_CONFIG } from "./regional.config";
-import { branchBars, branchStatus, regionSummary, simulatedBranchNrwPct } from "./regionalClient";
-import type { BranchRow } from "./types";
+import {
+  branchBars,
+  branchStatus,
+  regionSummary,
+  simulatedBranchNrwPct,
+  sortBranchBars,
+} from "./regionalClient";
+import type { BranchBar, BranchRow } from "./types";
 
 function row(overrides: Partial<BranchRow>): BranchRow {
   return {
@@ -108,5 +114,53 @@ describe("regionSummary", () => {
 
   it("returns all zeros for an empty region", () => {
     expect(regionSummary([])).toEqual({ totalM3: 0, branchCount: 0, avgNrwPct: 0, watchCount: 0 });
+  });
+});
+
+function bar(overrides: Partial<BranchBar>): BranchBar {
+  return {
+    rank: 1,
+    branchCode: "5551001",
+    branch: "A",
+    province: "P",
+    waterSoldM3: 100,
+    momPct: 1,
+    yoyPct: 1,
+    widthPct: 100,
+    nrwPct: 20,
+    status: "normal",
+    ...overrides,
+  };
+}
+
+describe("sortBranchBars", () => {
+  it("sorts descending / ascending by a numeric column without mutating the input", () => {
+    const bars = [
+      bar({ rank: 1, branchCode: "a", waterSoldM3: 100 }),
+      bar({ rank: 2, branchCode: "b", waterSoldM3: 300 }),
+      bar({ rank: 3, branchCode: "c", waterSoldM3: 200 }),
+    ];
+    expect(sortBranchBars(bars, "volume", "desc").map((b) => b.branchCode)).toEqual(["b", "c", "a"]);
+    expect(sortBranchBars(bars, "volume", "asc").map((b) => b.branchCode)).toEqual(["a", "c", "b"]);
+    expect(bars.map((b) => b.branchCode)).toEqual(["a", "b", "c"]);
+  });
+
+  it("sorts null MoM/YoY LAST regardless of direction", () => {
+    const bars = [
+      bar({ rank: 1, branchCode: "a", momPct: 5 }),
+      bar({ rank: 2, branchCode: "b", momPct: null }),
+      bar({ rank: 3, branchCode: "c", momPct: -3 }),
+    ];
+    expect(sortBranchBars(bars, "mom", "desc").map((b) => b.branchCode)).toEqual(["a", "c", "b"]);
+    expect(sortBranchBars(bars, "mom", "asc").map((b) => b.branchCode)).toEqual(["c", "a", "b"]);
+  });
+
+  it("breaks ties by the original rank, so a re-sort never scrambles equal rows", () => {
+    const bars = [
+      bar({ rank: 2, branchCode: "b", nrwPct: 30 }),
+      bar({ rank: 1, branchCode: "a", nrwPct: 30 }),
+      bar({ rank: 3, branchCode: "c", nrwPct: 10 }),
+    ];
+    expect(sortBranchBars(bars, "nrw", "desc").map((b) => b.branchCode)).toEqual(["a", "b", "c"]);
   });
 });

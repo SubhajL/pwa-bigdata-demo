@@ -120,3 +120,40 @@ export function regionSummary(bars: readonly BranchBar[]): RegionSummary {
   }
   return { totalM3, branchCount: bars.length, avgNrwPct: nrwSum / bars.length, watchCount };
 }
+
+// ── client-side league sort (Path D, PR-D2) ───────────────────────────────────────────
+
+/** The numeric columns a user can sort the league table by. */
+export type LeagueSortKey = "volume" | "mom" | "yoy" | "nrw";
+export type SortDir = "asc" | "desc";
+
+const SORT_ACCESSOR: Readonly<Record<LeagueSortKey, (b: BranchBar) => number | null>> = {
+  volume: (b) => b.waterSoldM3,
+  mom: (b) => b.momPct,
+  yoy: (b) => b.yoyPct,
+  nrw: (b) => b.nrwPct,
+};
+
+/**
+ * Sort a COPY of the league by one column. `null` MoM/YoY always sort last (a missing comparison is
+ * not "smallest"), and ties fall back to the endpoint's original `rank` so the sort is stable and a
+ * re-sort never scrambles equal rows. The `rank` column itself is untouched — the backend stores it
+ * over the default order, so a client re-sort renumbers nothing.
+ */
+export function sortBranchBars(
+  bars: readonly BranchBar[],
+  key: LeagueSortKey,
+  dir: SortDir,
+): BranchBar[] {
+  const accessor = SORT_ACCESSOR[key];
+  const factor = dir === "asc" ? 1 : -1;
+  return [...bars].sort((a, b) => {
+    const va = accessor(a);
+    const vb = accessor(b);
+    if (va == null && vb == null) return a.rank - b.rank;
+    if (va == null) return 1; // nulls last, regardless of direction
+    if (vb == null) return -1;
+    if (va === vb) return a.rank - b.rank;
+    return (va - vb) * factor;
+  });
+}
