@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BranchAiCard } from "@/features/branch/BranchAiCard";
 import { BranchBreadcrumb } from "@/features/branch/BranchBreadcrumb";
+import { BranchForecastCard, BranchPeerCard, BranchProductionCard } from "@/features/branch/BranchDetailPanels";
 import { BranchKpiRow } from "@/features/branch/BranchKpiRow";
 import { BranchTrendChart } from "@/features/branch/BranchTrendChart";
 import { useBranch, type BranchData } from "@/features/branch/useBranch";
@@ -115,6 +116,11 @@ function LoadedContent({
       <BranchBreadcrumb region={series.region} branch={series.branch} month={data.month} />
       <BranchKpiRow vitals={data.vitals!} standing={data.standing!} />
       <BranchTrendChart points={series.points} regionMedianM3={data.standing!.regionMedianM3} />
+      <div className="grid gap-4 lg:grid-cols-3">
+        <BranchPeerCard rank={data.standing!.rank} branchCount={data.standing!.branchCount} />
+        <BranchProductionCard soldM3={data.vitals!.m3} nrwPct={data.standing!.nrwPct} />
+        <BranchForecastCard m3={data.vitals!.m3} momPct={data.vitals!.momPct} />
+      </div>
       <BranchAiCard branch={series.branch} vitals={data.vitals!} standing={data.standing!} />
       <footer className="flex items-center gap-2 text-dense text-on-surface-variant">
         <SimulatedBadge /> อัตราน้ำสูญเสีย (NRW) และสถานะเป็นค่าจำลอง — ปริมาณจำหน่ายน้ำ · แนวโน้ม · อันดับ · ค่ากลางเขต เป็นข้อมูลจริงของ กปภ.
