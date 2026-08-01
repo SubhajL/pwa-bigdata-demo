@@ -4,13 +4,14 @@ import { apiJson } from "../lib/api";
 
 // Topic ๒ — Real-time Digital Twin (35 pts).
 //
-// NOTE on live transitions (items 2.2/2.4): the socket-driven status update and the pressure-drop
-// impact panel are unit/integration-verified in web/src/features/twin/useTwinSocket.test.tsx and
-// api/tests/test_twin_*.py. They are NOT re-driven here as timed live transitions because the
-// seeded demo device P-2 sits at health≈64 (warning) and the simulator's pressure_drop value
-// (~2.9 bar) stays inside the twin's band (low 2.0), so no clean normal→critical transition occurs
-// with the current demo data — a demo-data tuning owned by PR-7, flagged in docs/demo-runbook.md.
-// These E2E specs therefore assert the wired, live surfaces (real data, not the static mockup).
+// NOTE (items 2.2/2.4): the socket-driven status update and the pressure-drop impact panel are
+// unit/integration-verified in web/src/features/twin/useTwinSocket.test.tsx and api/tests/test_twin_*.py.
+// The PR-7 demo-data tuning (scripts/backfill_history.py::DEMO_WEAR_OVERRIDE) backfills P-2 to
+// health≈32 → `critical` (still pre-failure), so at a true cold start the twin colours it red;
+// pressure_drop drives pressure below the 2.0 low band (simulator/tests/test_pressure_drop.py). These
+// specs assert the wired, live surfaces (real data, not the static mockup) and tolerate `warning` as
+// well as `critical`: the live window averages readings per clock-hour, so a stack that has been
+// running a while washes P-2's health from red back up toward `warning`/`normal` (docs/demo-runbook.md).
 
 interface Device { asset_id: string; status: string; kind: string }
 
@@ -49,7 +50,8 @@ test("2.2 — device status on the twin is LIVE data, agreeing with the API (not
 
 test("2.3 — a non-nominal pump shows its shape-coded status and a SEC tooltip from real data", async ({ page }) => {
   await page.goto("/operations");
-  // P-2 is non-nominal (health≈64 → warning), rendered as a distinct SHAPE, never colour alone.
+  // P-2 is non-nominal (red at cold start; `warning` once the live window warms), rendered as a
+  // distinct SHAPE, never colour alone.
   const symbol = page.locator('[data-asset="P-2"]');
   await expect(symbol).toHaveAttribute("data-status", /warning|critical/);
   expect(await symbol.locator("[data-symbol]").count()).toBeGreaterThan(0);

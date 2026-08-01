@@ -230,20 +230,27 @@ def purge_backfill(pool: ConnectionPool) -> None:
 def backfilled(pool: ConnectionPool) -> Iterator[list[str]]:
     """Hourly history for a handful of pumps, ending now.
 
-    Uses the SAME script compose runs, so the window the tests score is the window the
-    demo scores. Returns the backfilled asset ids, worst-health LAST — `backfill_history`
-    spreads wear rates in ascending order, so the final id is the most degraded and is the
-    device a correct worklist must rank first.
+    Uses the SAME script compose runs, so the window the tests score is the window the demo
+    scores. Returns the backfilled asset ids sorted by the wear rate each was actually
+    backfilled with — worst-health LAST — so `backfilled[-1]` is the most degraded device (the
+    one a correct worklist ranks first) and `backfilled[0]` the healthiest. `backfill_history`
+    spreads wear by roster position, but `DEMO_WEAR_OVERRIDE` pins a demo pump (P-2) to the top
+    of the wear range even though it sorts early, so the ids are ordered by the wear map rather
+    than by trusting alphabetical order to track wear.
 
     Cleans up after itself; see `purge_backfill`.
     """
-    from scripts.backfill_history import DEFAULT_ASSETS, PUMP_QUERY, backfill
+    from scripts.backfill_history import DEFAULT_ASSETS, PUMP_QUERY, _wear_rate, backfill
 
     with pool.connection() as conn:
         backfill(conn, now=datetime.now(tz=UTC), assets=DEFAULT_ASSETS)
         with conn.cursor() as cur:
             cur.execute(PUMP_QUERY, (DEFAULT_ASSETS,))
-            assets = [row[0] for row in cur.fetchall()]
+            ordered = [row[0] for row in cur.fetchall()]
+    # `backfill` gives each pump the rate `_wear_rate(asset_id, position, total)` in this exact
+    # PUMP_QUERY order; health is monotonic in wear, so sorting by that rate yields worst last.
+    wear = {asset_id: _wear_rate(asset_id, i, len(ordered)) for i, asset_id in enumerate(ordered)}
+    assets = sorted(ordered, key=wear.__getitem__)
     try:
         yield assets
     finally:

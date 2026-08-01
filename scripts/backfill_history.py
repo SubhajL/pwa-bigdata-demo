@@ -64,10 +64,34 @@ DEFAULT_ASSETS = 12
 #: the wear range have genuinely degraded by the time the window opens.
 _RUN_UP_HOURS = 200
 
+#: Latent health at or below which a device has "failed". The estimator was trained ONLY on
+#: windows ending before this crossing — `pwa_ml/datasets.py` drops censored/post-failure
+#: windows as "not a prediction problem any more" — so a backfilled pump whose scored window
+#: sits past it would be scored OUT OF DOMAIN: saturated post-failure output dressed up as a
+#: prediction (PTTF pinned to 0). Every wear rate below is chosen to keep the window pre-failure.
+#: Mirrors the value passed to `generate_lifecycle` in `_rows_for`.
+_FAILURE_THRESHOLD = 30.0
+
 #: Latent health lost per hour, lowest to highest. The spread is what makes the worklist an
 #: ordering rather than a list — without it every device scores the same and item 3.5's
-#: "ranked by risk" is unfalsifiable.
-_WEAR_MIN, _WEAR_MAX = 0.02, 0.36
+#: "ranked by risk" is unfalsifiable. The max is capped so the MOST-worn spread pump still stays
+#: PRE-FAILURE over the 200 h run-up (0.32 → latent ≈36 at the window's end, above the 30
+#: `_FAILURE_THRESHOLD`), keeping every backfilled score inside the model's training domain.
+_WEAR_MIN, _WEAR_MAX = 0.02, 0.32
+
+#: Demo pumps pinned to a chosen wear rate, INDEPENDENT of where they sort in the roster, so a
+#: scored surface always has a device in a known band. P-2 is THE demonstrated pump (twin items
+#: 2.2 / 2.3 / 3.3 and the runbook): the twin must colour it RED, and the only path to a
+#: `critical` symbol is a model-health score below `pwa_ml.predict.CRITICAL_BELOW` (=40) — a
+#: single below-band reading tops out at `warning` (`api.app.bands`). At index 1 the default
+#: spread gives P-2 wear ≈0.05 → health ≈90 (`normal`). 0.34 makes it the MOST-worn backfilled
+#: pump (above `_WEAR_MAX`, so worklist rank #1) and scores its cold-start window at health ≈32:
+#: `critical` with margin below 40, yet PRE-FAILURE (`_FAILURE_THRESHOLD`) — a genuine "degraded,
+#: predicted to fail" case with a finite PTTF once live telemetry enters the window, NOT saturated
+#: post-failure output. Verified in `api/tests/test_backfill_demo_health.py`. NOTE: the live
+#: scoring window averages every reading in a clock-hour, so this baseline reads critical only
+#: near a true cold start (`make demo-down` then preflight); see docs/demo-runbook.md.
+DEMO_WEAR_OVERRIDE: dict[str, float] = {"P-2": 0.34}
 
 _PREFIX = "backfill-"
 
@@ -86,8 +110,16 @@ VALUES (%s, %s, %s, %s, %s, %s, 'BACKFILL')
 """
 
 
-def _wear_rate(index: int, total: int) -> float:
-    """Spread wear rates evenly so the backfilled fleet spans healthy to failing."""
+def _wear_rate(asset_id: str, index: int, total: int) -> float:
+    """Wear rate for one backfilled pump.
+
+    A demo pump in `DEMO_WEAR_OVERRIDE` is pinned to its chosen rate so its scored band does
+    not depend on where it sorts in the roster; every other pump gets a rate spread evenly
+    across `[_WEAR_MIN, _WEAR_MAX]` by index, which is what keeps the worklist an ordering
+    (item 3.5) rather than a flat list.
+    """
+    if asset_id in DEMO_WEAR_OVERRIDE:
+        return DEMO_WEAR_OVERRIDE[asset_id]
     if total <= 1:
         return _WEAR_MIN
     return _WEAR_MIN + (_WEAR_MAX - _WEAR_MIN) * (index / (total - 1))
@@ -106,8 +138,8 @@ def _rows_for(asset_id: str, index: int, total: int) -> list[tuple[int, str, flo
         lifecycle_id=f"backfill-{asset_id}",
         seed=zlib.crc32(asset_id.encode()),
         hours=_RUN_UP_HOURS,
-        wear_rate=_wear_rate(index, total),
-        failure_threshold=30.0,
+        wear_rate=_wear_rate(asset_id, index, total),
+        failure_threshold=_FAILURE_THRESHOLD,
     )
     tail = run.rows[-HISTORY_HOURS:]
     out: list[tuple[int, str, float]] = []

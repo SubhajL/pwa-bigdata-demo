@@ -49,13 +49,18 @@ ordered rows.
 | 2.4 (10) | click **P-2** while a drop is active | the **ผู้ใช้น้ำที่ได้รับผลกระทบ** card | affected pipes highlighted + a real, non-zero customer list | `make demo-scenario MODE=normal` |
 | 2.5 (5) | open the repo in the IDE | `web/src/features/twin/twin.config.ts` + `DeviceSymbol.tsx`, `PipeEdge.tsx`, `ProcessSchematic.tsx` | one config file + ≥ 3 components | — |
 
-> **⚠ Demo-data note (2.2 / 2.4), owned by PR-7.** The seeded pump **P-2 currently reads
-> `warning` from its health score (≈ 64, just below the 65 threshold)**, and the simulator's
-> `pressure_drop` value (~2.9 bar) stays **inside** the twin's pressure band (low 2.0) — so a clean
-> `normal → critical` transition is not visible with today's seed. The socket update (2.2) and the
-> impact panel (2.4) are wired and unit/integration-tested; to make the *live transition* pop for a
-> judge, PR-7 should lower the demo pump's baseline health and drive `pressure_drop` below 2.0 bar.
-> This is exactly the kind of gap the score gate exists to surface.
+> **✔ Demo-data tuning (2.2 / 2.4), PR-7 — landed 2026-08-01.** Pump **P-2 now backfills to
+> `critical`** (health ≈ 32, still declining and PRE-failure — a "predicted to fail" case, not an
+> already-failed one; `scripts/backfill_history.py::DEMO_WEAR_OVERRIDE`), so the twin colours it
+> **red** and it ranks #1 on the worklist — a clean red device for items 2.2 / 2.3 / 3.3. And
+> `pressure_drop` measurably drives pressure **below the 2.0 low band**
+> (`simulator/tests/test_pressure_drop.py`), so `make demo-scenario MODE=pressure_drop` highlights
+> `PIPE-P2-TANK` and lists affected customers (2.4). A single below-band reading classifies at most as
+> `warning` by design (`api/app/bands.py`); the red symbol is the health path, not the band path.
+>
+> **⚠ Cold-start matters.** The live scoring window averages every reading in a clock-hour, so P-2 reads
+> red only near a **true cold start**. If the stack has been running a while, run **`make demo-down`**
+> (removes volumes) then **`make demo-preflight`**, and demonstrate the twin items within the first hour.
 
 ---
 
