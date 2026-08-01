@@ -36,6 +36,7 @@ from pathlib import Path
 from .models import (
     BranchRow,
     BranchSeries,
+    CuratedTrust,
     NationalSeries,
     NationalSeriesPoint,
     RegionRollup,
@@ -110,12 +111,16 @@ class CuratedStore:
     #: the count makes any future one visible instead of silent.
     skipped_rows: int
 
+    #: Basename of the source file, for the trust/provenance report. Set by `load_curated`.
+    source: str
+
     def __init__(self) -> None:
         # (branch_code, month) -> (region, province, branch, water_sold_m3)
         self._data: dict[tuple[str, str], tuple[int, str, str, float]] = {}
         self._codes: set[str] = set()
         self._months: list[str] = []
         self.skipped_rows = 0
+        self.source = ""
 
     def months(self) -> list[str]:
         """Every month present, ascending, unique, normalised to ``YYYY-MM``.
@@ -128,6 +133,25 @@ class CuratedStore:
     def branch_codes(self) -> set[str]:
         """Every distinct `branch_code`. 234 for the committed dataset."""
         return set(self._codes)
+
+    def trust(self) -> CuratedTrust:
+        """Measured provenance & integrity of the loaded data (Path D).
+
+        Every field is counted from what was actually loaded — nothing here is synthesised —
+        so the national screen can certify on screen which figures are real. `region_count`
+        is a COUNT DISTINCT of the region held on each record.
+        """
+        regions = {region for (region, _p, _b, _v) in self._data.values()}
+        return CuratedTrust(
+            source=self.source,
+            record_count=len(self._data),
+            branch_count=len(self._codes),
+            region_count=len(regions),
+            month_count=len(self._months),
+            first_month=self._months[0] if self._months else None,
+            last_month=self._months[-1] if self._months else None,
+            skipped_rows=self.skipped_rows,
+        )
 
     def national(self, month: str) -> RegionRollup:
         """Roll one month up to the national total and its ten regions.
@@ -403,4 +427,5 @@ def load_curated(path: str | Path) -> CuratedStore:
             seen_volumes[key] = volume
 
     store._months = sorted(seen_months)
+    store.source = path.name
     return store

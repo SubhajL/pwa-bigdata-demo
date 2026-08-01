@@ -44,6 +44,19 @@ export interface NationalSeries {
   readonly points: readonly NationalSeriesPoint[];
 }
 
+/** GET /api/curated/trust (mirrors `models.CuratedTrust`). Measured provenance — REAL, never
+ *  a SimulatedBadge; it is the honest marker that CERTIFIES which figures are real. */
+export interface CuratedTrust {
+  readonly source: string;
+  readonly record_count: number;
+  readonly branch_count: number;
+  readonly region_count: number;
+  readonly month_count: number;
+  readonly first_month: string | null;
+  readonly last_month: string | null;
+  readonly skipped_rows: number;
+}
+
 // ── view models (derived; never on the wire) ──────────────────────────────────────────
 
 /** National month-over-month / year-over-year change. `null` — never 0 — when the comparison

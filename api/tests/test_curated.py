@@ -68,6 +68,32 @@ def test_national_rollup_matches_the_real_december_total(store: CuratedStore) ->
     assert rollup.regions == sorted(rollup.regions, key=lambda r: r.water_sold_m3, reverse=True)
 
 
+def test_trust_reports_measured_provenance(store: CuratedStore) -> None:
+    """`trust()` certifies the real dataset from what was actually loaded — nothing synthesised."""
+    trust = store.trust()
+    assert trust.source.endswith(".csv")
+    assert trust.branch_count == EXPECTED_BRANCH_CODES
+    assert trust.region_count == EXPECTED_REGIONS
+    assert trust.month_count == EXPECTED_MONTHS
+    assert trust.first_month == FIRST_MONTH
+    assert trust.last_month == LAST_MONTH
+    assert trust.skipped_rows == 0
+    # 234 branches × 39 months — the committed dataset is a COMPLETE (branch, month) grid, no gaps.
+    assert trust.record_count == EXPECTED_BRANCH_CODES * EXPECTED_MONTHS  # 9126
+
+
+def test_trust_counts_a_quarantined_row(tmp_path: pathlib.Path) -> None:
+    """A skipped (non-finite/negative) volume is surfaced in trust().skipped_rows, not hidden."""
+    csv = _write_csv(
+        tmp_path / "c.csv",
+        ["1,A001,ProvA,BranchA,2023-01-01,100.0", "1,A002,ProvA,BranchB,2023-01-01,-5.0"],
+    )
+    trust = load_curated(csv).trust()
+    assert trust.skipped_rows == 1
+    assert trust.record_count == 1
+    assert trust.source == "c.csv"
+
+
 def test_branch_count_is_234_not_235(store: CuratedStore) -> None:
     """Labels are not identity.
 
@@ -307,6 +333,28 @@ def test_months_route(client: TestClient) -> None:
     assert body["months"][-1] == LAST_MONTH
 
 
+def test_trust_route_shape_and_values(client: TestClient) -> None:
+    with client:
+        response = client.get("/api/curated/trust")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["branch_count"] == EXPECTED_BRANCH_CODES
+    assert body["region_count"] == EXPECTED_REGIONS
+    assert body["month_count"] == EXPECTED_MONTHS
+    assert body["last_month"] == LAST_MONTH
+    assert body["skipped_rows"] == 0
+    assert set(body) == {
+        "source",
+        "record_count",
+        "branch_count",
+        "region_count",
+        "month_count",
+        "first_month",
+        "last_month",
+        "skipped_rows",
+    }
+
+
 def test_national_route_shape_and_value(client: TestClient) -> None:
     with client:
         response = client.get("/api/curated/national", params={"month": LAST_MONTH})
@@ -372,6 +420,7 @@ def test_routes_are_declared_in_openapi_with_response_models(client: TestClient)
     with client:
         schema = client.get("/openapi.json").json()
     for path in (
+        "/api/curated/trust",
         "/api/curated/months",
         "/api/curated/national",
         "/api/curated/regions/{region}",
@@ -399,6 +448,7 @@ def test_curated_routes_return_503_when_the_dataset_is_not_mounted(
     with TestClient(app) as unmounted:
         assert unmounted.get("/healthz").status_code == 200
         assert unmounted.get("/api/curated/months").status_code == 503
+        assert unmounted.get("/api/curated/trust").status_code == 503
 
 
 # ── PR-10: national monthly series (one call powering the trend + national MoM/YoY) ───────
