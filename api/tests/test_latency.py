@@ -56,6 +56,52 @@ def _seed_readings(pool: ConnectionPool, run_id: str, n: int) -> None:
             )
 
 
+def _seed_selectivity_noise(pool: ConnectionPool, run_id: str, rows_per_asset: int) -> int:
+    """Fill the table with other roster assets' readings so `asset_id = P-2` is *selective*.
+
+    The plan guard needs the planner to pick the composite `(asset_id, ts DESC)` index over the
+    hypertable's time-only index. With one asset both cost ~1 tuple and the choice is a
+    coin-flip; giving `asset_id` real cardinality makes the composite seek the cheapest path by
+    a wide, ANALYZE-visible margin. The noise timestamps are NEWER than the P-2 window (base is
+    stamped after `_seed_readings` ran), so a time-only backward scan would have to walk past
+    all of them — precisely the cost the composite seek avoids. Returns the rows written.
+    """
+    base = datetime.now(tz=UTC)
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT asset_id FROM device WHERE asset_id <> %s ORDER BY asset_id LIMIT 30",
+                (SEEDED_ASSET,),
+            )
+            assets = [str(r[0]) for r in cur.fetchall()]
+        # Fail LOUDLY, not silently, if the roster ever shrinks below what makes P-2 a
+        # minority: with the caller's rows_per_asset=80 and 200 P-2 rows, >=25 other assets
+        # keeps P-2 under ~10% of the table, which is what makes the composite seek decisively
+        # cheapest. Fewer assets would quietly let the old planner coin-flip (and the flake)
+        # return, so we assert the fixture's selectivity precondition rather than assume it.
+        assert len(assets) >= 25, (
+            f"roster has only {len(assets)} other assets; too few to make asset_id selective — "
+            "the plan guard would silently re-flake"
+        )
+        written = 0
+        for a_idx, asset in enumerate(assets):
+            for i in range(rows_per_asset):
+                reading = Reading(
+                    message_id=f"{run_id}-{a_idx}-{i}",
+                    run_id=run_id,
+                    ts=base + timedelta(seconds=a_idx * rows_per_asset + i + 1),
+                    asset_id=asset,
+                    signal="pressure_bar",
+                    value=2.5 + (i % 7) * 0.1,
+                )
+                disposition(
+                    conn, message_id=reading.message_id, run_id=run_id,
+                    raw={"i": i}, outcome=Accepted(reading),
+                )
+                written += 1
+    return written
+
+
 @pytest.fixture(scope="module")
 def live_api(timescale_dsn: str) -> Iterator[str]:
     """A real uvicorn serving the app over TCP. Yields the base URL."""
@@ -206,37 +252,96 @@ def _plan_nodes(plan: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def test_latest_query_uses_the_index_and_does_not_scan(pool: ConnectionPool) -> None:
-    """The budget is only defensible if the plan is a seek.
+    """The budget is only defensible if the plan is the ordered composite-index seek.
 
     A mean under 500 ms on a small fixture proves nothing — `query_range(asset, min, max)[-1]`
     would pass that too, and then fall over on a year of history. This asserts the PLAN
     rather than the wall clock, which is the part that stays true as the table grows.
+
+    The flake this guard used to have was a *fixture* defect, not a query defect. With a
+    single asset the predicate `asset_id = 'P-2'` selects every row, so the composite
+    `(asset_id, ts DESC)` index and the hypertable's own time-only index BOTH cost ~1 tuple,
+    and the planner's tie-break between them — and against a small-table seq scan — was a
+    coin-flip (~1 run in 4 it scanned). We fix the fixture, not the assertion: seed real
+    background volume across many other roster assets so `asset_id = 'P-2'` is genuinely
+    selective, then ANALYZE. Now the composite seek is decisively the cheapest path in the
+    planner's cost estimate — a time-only scan would have to walk past every newer other-asset
+    row, and a seq scan reads the whole table — so the ordered seek is chosen deterministically
+    on its own merits, with nothing forced. If the query stopped being index-compatible the
+    planner would fall back to a sequential scan (rejected below), or to a bitmap scan feeding a
+    Sort with no ordered index scan (also rejected); an unbounded variant is caught by the Limit
+    check. This guards the SQL shape; a companion test pins that `latest_reading()` runs it.
     """
     from app.db import LATEST_QUERY
 
-    _seed_readings(pool, f"plan-{uuid.uuid4().hex[:8]}", 500)
+    noise_run = f"plan-noise-{uuid.uuid4().hex[:8]}"
+    _seed_readings(pool, f"plan-{uuid.uuid4().hex[:8]}", 200)
+    _seed_selectivity_noise(pool, noise_run, rows_per_asset=80)
 
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(f"EXPLAIN (ANALYZE, FORMAT JSON) {LATEST_QUERY}", (SEEDED_ASSET,))
-        row = cur.fetchone()
-        assert row is not None
-        explained: list[dict[str, Any]] = row[0]
-        plan: dict[str, Any] = explained[0]["Plan"]
+    try:
+        with pool.connection() as conn, conn.cursor() as cur:
+            cur.execute("ANALYZE telemetry")
+            cur.execute(f"EXPLAIN (ANALYZE, FORMAT JSON) {LATEST_QUERY}", (SEEDED_ASSET,))
+            row = cur.fetchone()
+            assert row is not None
+            explained: list[dict[str, Any]] = row[0]
+            plan: dict[str, Any] = explained[0]["Plan"]
 
-    nodes = _plan_nodes(plan)
-    node_types = {n.get("Node Type", "") for n in nodes}
+        nodes = _plan_nodes(plan)
+        node_types = {n.get("Node Type", "") for n in nodes}
 
-    assert not any("Seq Scan" in nt for nt in node_types), (
-        f"the latest-reading query is scanning: {sorted(node_types)}"
-    )
-    # Substring-matching "Index" would also accept a bitmap scan followed by a sort, which
-    # is not the ordered seek the latency budget depends on.
-    assert any("Index Scan" in nt or "Index Only Scan" in nt for nt in node_types), (
-        f"no ordered index scan in the plan: {sorted(node_types)}"
-    )
-    indexes = {n.get("Index Name", "") for n in nodes}
-    assert any("asset_ts" in ix for ix in indexes), (
-        f"the (asset_id, ts DESC) index was not used; got {sorted(indexes)}"
+        assert not any("Seq Scan" in nt for nt in node_types), (
+            f"the latest-reading query is scanning: {sorted(node_types)}"
+        )
+        # Substring-matching "Index" would also accept a bitmap scan followed by a sort, which
+        # is not the ordered seek the latency budget depends on.
+        assert any("Index Scan" in nt or "Index Only Scan" in nt for nt in node_types), (
+            f"no ordered index scan in the plan: {sorted(node_types)}"
+        )
+        indexes = {n.get("Index Name", "") for n in nodes}
+        assert any("asset_ts" in ix for ix in indexes), (
+            f"the (asset_id, ts DESC) index was not used; got {sorted(indexes)}"
+        )
+        # An ordered index scan alone is not enough: dropping `LIMIT 1` would still scan this
+        # asset's WHOLE history via the same index and pass every assertion above, which is the
+        # O(rows) blow-up the budget forbids. Pin the seek as BOUNDED — a Limit node that the
+        # EXPLAIN ANALYZE proves actually pulled exactly one row.
+        limit_nodes = [n for n in nodes if n.get("Node Type") == "Limit"]
+        assert limit_nodes, (
+            f"no Limit node — the seek is unbounded and scans the asset's history: "
+            f"{sorted(node_types)}"
+        )
+        assert all(n.get("Actual Rows") == 1 for n in limit_nodes), (
+            "the latest-reading seek pulled more than one row: "
+            f"{[n.get('Actual Rows') for n in limit_nodes]}"
+        )
+    finally:
+        # Purge the 30-asset background volume so it cannot contaminate later tests sharing this
+        # session's database (both tables carry run_id since migration 002; the deletes are
+        # index-served). Mirrors the file's existing purge discipline for reshaping fixtures.
+        with pool.connection() as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM telemetry WHERE run_id = %s", (noise_run,))
+            cur.execute("DELETE FROM ingress_ledger WHERE run_id = %s", (noise_run,))
+
+
+def test_latest_reading_executes_the_indexed_query() -> None:
+    """Wire the plan guard to production.
+
+    `test_latest_query_uses_the_index_and_does_not_scan` explains the LATEST_QUERY *constant*,
+    so it only defends the budget if `latest_reading()` actually runs that constant. A refactor
+    to `query_range(asset, t0, t1)[-1]` would return the correct newest row — leaving every
+    correctness test green — while silently swapping the bounded seek for a full-window scan.
+    Pin the wiring so that regression cannot pass unseen. (Whitebox on purpose: if the query is
+    ever inlined, point the plan guard at the new source of truth and update this assertion.)
+    """
+    import inspect
+
+    from app import db
+
+    source = inspect.getsource(db.latest_reading)
+    assert "LATEST_QUERY" in source, (
+        "latest_reading() no longer executes LATEST_QUERY — the plan guard now defends a query "
+        "the production read path does not run"
     )
 
 

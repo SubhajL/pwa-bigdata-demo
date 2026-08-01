@@ -12,20 +12,37 @@ WEB="${WEB_BASE:-http://localhost:5173}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 COMPOSE=(docker compose -f "$ROOT/infra/docker-compose.yml")
 
+# Bound every probe: a socket that accepts the connection but never answers (a hung Vite dev
+# server, a blackholed port) would otherwise wedge a curl — and the whole gate — indefinitely,
+# right past the nominal wait budget. --connect-timeout caps the TCP handshake, --max-time the
+# whole request; on timeout curl exits non-zero, which reads exactly like "not ready yet".
+CURL=(curl -sf --connect-timeout 2 --max-time 5)
+
 echo "═══ PWA big-data demo — preflight ═══"
 echo "→ bringing the stack up (build if needed) …"
 "${COMPOSE[@]}" up -d --build
 
 printf '→ waiting for API %s/healthz ' "$API"
 for i in $(seq 1 60); do
-  if curl -sf "$API/healthz" >/dev/null 2>&1; then echo "OK"; break; fi
+  if "${CURL[@]}" "$API/healthz" >/dev/null 2>&1; then echo "OK"; break; fi
   printf '.'; sleep 2
   if [ "$i" = 60 ]; then echo " TIMEOUT"; exit 1; fi
 done
 
+# The web container's Vite dev server can take several seconds past API-healthy to answer,
+# so a one-shot probe in the surface list below false-fails on a cold `up`. Wait for it the
+# same way we wait for the API. On genuine timeout we don't exit here: the frontend is one of
+# many surfaces, so we fall through and let the aggregated `check` below own the ✗ verdict.
+printf '→ waiting for frontend %s ' "$WEB"
+for i in $(seq 1 30); do
+  if "${CURL[@]}" "$WEB/" >/dev/null 2>&1; then echo "OK"; break; fi
+  printf '.'; sleep 2
+  if [ "$i" = 30 ]; then echo " TIMEOUT (still down — surface check will report it)"; fi
+done
+
 FAILED=0
 check() { # label url
-  if curl -sf "$2" >/dev/null 2>&1; then
+  if "${CURL[@]}" "$2" >/dev/null 2>&1; then
     printf '  ✓ %-34s %s\n' "$1" "$2"
   else
     printf '  ✗ %-34s %s  (FAIL)\n' "$1" "$2"; FAILED=1
@@ -45,7 +62,7 @@ check "Swagger UI (item 3.4)"       "$API/docs"
 check "frontend"                    "$WEB/"
 
 # Deeper readiness: the model must have produced at least one score (else topic ๓ is blank).
-scored=$(curl -sf "$API/api/worklist?limit=50" 2>/dev/null \
+scored=$("${CURL[@]}" "$API/api/worklist?limit=50" 2>/dev/null \
   | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)
 if [ "${scored:-0}" -gt 0 ]; then
   printf '  ✓ %-34s %s device(s) scored\n' "topic ๓ · scoring produced output" "$scored"
