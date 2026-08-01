@@ -178,7 +178,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     icon: Bot,
     section: "system",
     screen: "S9",
-    built: false,
+    built: true,
     ownedBy: "PR-16",
   },
 ] as const;
