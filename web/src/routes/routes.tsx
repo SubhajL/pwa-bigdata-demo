@@ -17,6 +17,7 @@ import { OperationsTwinScreen } from "@/screens/OperationsTwinScreen";
 import { PipelineMonitorScreen } from "@/screens/PipelineMonitorScreen";
 import { PlaceholderScreen } from "@/screens/PlaceholderScreen";
 import { PredictiveAnalyticsScreen } from "@/screens/PredictiveAnalyticsScreen";
+import { RegionalScreen } from "@/screens/RegionalScreen";
 import { NAV_ITEMS, type NavItem } from "@/routes/nav";
 
 /**
@@ -26,6 +27,7 @@ import { NAV_ITEMS, type NavItem } from "@/routes/nav";
  */
 const SCREENS: Readonly<Record<string, ComponentType>> = {
   national: NationalExecutiveScreen,
+  regional: RegionalScreen,
   operations: OperationsTwinScreen,
   pipeline: PipelineMonitorScreen,
   predictive: PredictiveAnalyticsScreen,

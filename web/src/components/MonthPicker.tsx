@@ -7,9 +7,10 @@ export interface MonthPickerProps {
 }
 
 /**
- * The global month selector (Stitch S1 top bar). Options are the REAL months, labelled in the
- * Buddhist era (formatMonthTh). Selecting a month is what drives the sticky `?month=` URL state
- * (INTERACTIONS.md) — the screen owns that; this control just reports the choice.
+ * The global month selector, shared by the role dashboards (national/regional/branch). Options are
+ * the REAL months, labelled in the Buddhist era (formatMonthTh). Selecting a month drives the
+ * sticky `?month=` URL state (INTERACTIONS.md) — each screen owns that; this control just reports
+ * the choice.
  */
 export function MonthPicker({ months, value, onChange }: MonthPickerProps): JSX.Element {
   return (
