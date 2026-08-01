@@ -28,6 +28,12 @@ ml/artifacts/*.pkl
 # Design review artifacts (regenerated; committed screens live in design/screens/)
 design/actual/
 
+# Playwright E2E outputs (the harness is committed; its run artifacts are not)
+e2e/test-results/
+e2e/playwright-report/
+e2e/blob-report/
+e2e/.playwright/
+
 # OS / editor
 .DS_Store
 *.swp

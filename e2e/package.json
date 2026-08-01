@@ -1,0 +1,15 @@
+{
+  "name": "pwa-demo-e2e",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Playwright E2E over the 16 scored ผนวก ๑๓ items, driven against the live compose stack (PR-17 / slice S-D).",
+  "scripts": {
+    "test": "playwright test",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.49.1",
+    "@types/node": "22.10.5"
+  }
+}
