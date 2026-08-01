@@ -11,6 +11,7 @@ import { Navigate, type RouteObject } from "react-router-dom";
 import type { ComponentType } from "react";
 
 import { AppShell } from "@/components/AppShell";
+import { BranchScreen } from "@/screens/BranchScreen";
 import { NationalExecutiveScreen } from "@/screens/NationalExecutiveScreen";
 import { NotFoundScreen } from "@/screens/NotFoundScreen";
 import { OperationsTwinScreen } from "@/screens/OperationsTwinScreen";
@@ -28,6 +29,7 @@ import { NAV_ITEMS, type NavItem } from "@/routes/nav";
 const SCREENS: Readonly<Record<string, ComponentType>> = {
   national: NationalExecutiveScreen,
   regional: RegionalScreen,
+  branch: BranchScreen,
   operations: OperationsTwinScreen,
   pipeline: PipelineMonitorScreen,
   predictive: PredictiveAnalyticsScreen,
