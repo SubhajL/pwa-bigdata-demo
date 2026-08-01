@@ -48,11 +48,24 @@ describe("RegionalScreen", () => {
     expect(screen.getByRole("heading", { name: /ระดับเขต/ })).toBeInTheDocument();
   });
 
-  it("shows an honest 'pick a region' prompt when no region is selected (no crash)", () => {
+  it("defaults to a region when none is selected (no empty prompt) and offers a เขต selector", () => {
+    mMonths.mockReturnValue(new Promise(() => {}));
+    mRegion.mockReturnValue(new Promise(() => {}));
+    renderAt("/regions"); // reached straight from the sidebar, no ?region=
+    // No dead-end prompt: the heading names the defaulted region and a เขต selector is present.
+    expect(screen.queryByTestId("regional-no-region")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /ระดับเขต · เขต 1/ })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "เลือกเขต" })).toHaveValue("1");
+  });
+
+  it("switches region via the selector", async () => {
+    mMonths.mockResolvedValue({ months: ["2025-12"], count: 1 });
+    mRegion.mockResolvedValue(REGION_ROWS);
     renderAt("/regions");
-    expect(screen.getByTestId("regional-no-region")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /ระดับเขต/ })).toBeInTheDocument();
-    expect(mRegion).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("combobox", { name: "เลือกเขต" }), { target: { value: "5" } });
+    expect(await screen.findByRole("heading", { name: /ระดับเขต · เขต 5/ })).toBeInTheDocument();
+    // Actually re-fetches the new region (not just a heading relabel).
+    expect(mRegion).toHaveBeenCalledWith(5, expect.anything(), expect.anything());
   });
 
   it("shows an error Alert (not a blank) when the load fails", async () => {

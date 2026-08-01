@@ -25,6 +25,12 @@ export const REGIONAL_CONFIG = {
   minRegion: 1,
   maxRegion: 10,
   /**
+   * The region a drill screen falls back to when reached WITHOUT a selection (e.g. straight from the
+   * sidebar, not drilled from the national map). So ระดับเขต / ระดับสาขา land on real content instead
+   * of an empty "pick a region first" prompt.
+   */
+  defaultRegion: 1,
+  /**
    * SIMULATED per-branch NRW (S2 shows this column). These are ILLUSTRATIVE mock figures for the
    * demo — not measured PWA data — spread over [min,max]% deterministically per branch_code, and
    * always rendered behind a SimulatedBadge. The thresholds mirror the alert rule in design S7

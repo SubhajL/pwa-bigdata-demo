@@ -13,10 +13,11 @@ vi.mock("@/features/branch/branchClient", async (importActual) => {
 });
 vi.mock("@/features/regional/regionalClient", async (importActual) => {
   const actual = await importActual<typeof import("@/features/regional/regionalClient")>();
-  return { ...actual, fetchRegion: vi.fn() };
+  // fetchMonths here is the one the BranchPicker uses (regionalClient), distinct from branchClient's.
+  return { ...actual, fetchRegion: vi.fn(), fetchMonths: vi.fn() };
 });
 
-import { fetchRegion } from "@/features/regional/regionalClient";
+import { fetchMonths as fetchRegionMonths, fetchRegion } from "@/features/regional/regionalClient";
 import type { BranchRow } from "@/features/regional/types";
 
 import { fetchBranch, fetchMonths } from "@/features/branch/branchClient";
@@ -27,6 +28,7 @@ import { BranchScreen } from "./BranchScreen";
 const mMonths = vi.mocked(fetchMonths);
 const mBranch = vi.mocked(fetchBranch);
 const mRegion = vi.mocked(fetchRegion);
+const mRegionMonths = vi.mocked(fetchRegionMonths);
 
 function NavButton({ to }: { readonly to: string }): JSX.Element {
   const navigate = useNavigate();
@@ -69,10 +71,15 @@ describe("BranchScreen", () => {
     expect(screen.getByRole("heading", { name: /ระดับสาขา/ })).toBeInTheDocument();
   });
 
-  it("shows an honest prompt when no branch is selected (no crash, no fetch)", () => {
-    renderAt("/branches");
-    expect(screen.getByTestId("branch-no-branch")).toBeInTheDocument();
+  it("shows a branch picker (not a dead-end prompt) when no branch is selected", () => {
+    mRegionMonths.mockReturnValue(new Promise(() => {}));
+    mRegion.mockReturnValue(new Promise(() => {}));
+    renderAt("/branches"); // reached straight from the sidebar, no ?branch=
+    expect(screen.queryByTestId("branch-no-branch")).not.toBeInTheDocument();
+    expect(screen.getByTestId("branch-picker")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "เลือกเขต" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /ระดับสาขา/ })).toBeInTheDocument();
+    // The picker lists branches to drill into; it never fetches a single branch's detail.
     expect(mBranch).not.toHaveBeenCalled();
   });
 
