@@ -8,6 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BranchLeagueTable } from "@/features/regional/BranchLeagueTable";
+import { RegionBranchNrwChart, RegionStepTestCard } from "@/features/regional/RegionDetailPanels";
 import { RegionBreadcrumb } from "@/features/regional/RegionBreadcrumb";
 import { RegionOfficeMap } from "@/features/regional/RegionOfficeMap";
 import { RegionalKpiRow } from "@/features/regional/RegionalKpiRow";
@@ -163,6 +164,10 @@ function LoadedContent({
         <div className="lg:col-span-8">
           <BranchLeagueTable bars={bars} month={data.month} />
         </div>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <RegionBranchNrwChart bars={bars} />
+        <RegionStepTestCard />
       </div>
       <footer className="flex items-center gap-2 text-dense text-on-surface-variant">
         <SimulatedBadge /> คอลัมน์ NRW · สถานะ และ KPI อัตราน้ำสูญเสีย · สาขาที่ต้องเฝ้าระวัง เป็นค่าจำลอง —

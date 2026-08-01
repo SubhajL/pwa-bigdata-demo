@@ -77,6 +77,9 @@ describe("RegionalScreen", () => {
     renderAt("/regions?region=2&month=2025-12");
     expect(await screen.findByTestId("regional-kpis")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "รังสิต" })).toBeInTheDocument();
+    // The S2 sub-panels (Path D) are wired into the loaded view.
+    expect(screen.getByTestId("region-nrw-chart")).toBeInTheDocument();
+    expect(screen.getByTestId("region-steptest")).toBeInTheDocument();
     const footer = screen.getByRole("contentinfo");
     expect(footer).toHaveTextContent("เป็นค่าจำลอง");
     expect(within(footer).getByText("SIMULATED")).toBeInTheDocument();
