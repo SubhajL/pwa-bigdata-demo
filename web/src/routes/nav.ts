@@ -167,7 +167,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     icon: Bell,
     section: "system",
     screen: "S7",
-    built: false,
+    built: true,
     ownedBy: "PR-15",
   },
   {
