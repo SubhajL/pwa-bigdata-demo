@@ -13,7 +13,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from ..curated import CuratedStore
-from ..models import BranchRow, BranchSeries, CuratedMonths, RegionRollup
+from ..models import BranchRow, BranchSeries, CuratedMonths, NationalSeries, RegionRollup
 
 router = APIRouter(prefix="/api/curated", tags=["curated"])
 
@@ -68,6 +68,18 @@ def curated_national(
     if rollup.branch_count == 0 and len(rollup.regions) == 0:
         raise HTTPException(status_code=404, detail=f"no data for month {month}")
     return rollup
+
+
+@router.get(
+    "/national/series", response_model=NationalSeries, summary="National totals for every month"
+)
+def curated_national_series(request: Request) -> NationalSeries:
+    """The 39-month national series — total water sold and distinct branches per month.
+
+    One call for the executive trend line and national MoM/YoY. Real data, not simulated. A
+    literal path, so it never collides with `/national` (which takes a `?month=` query).
+    """
+    return _store(request).national_series()
 
 
 @router.get(

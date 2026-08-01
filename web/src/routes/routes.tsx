@@ -11,6 +11,7 @@ import { Navigate, type RouteObject } from "react-router-dom";
 import type { ComponentType } from "react";
 
 import { AppShell } from "@/components/AppShell";
+import { NationalExecutiveScreen } from "@/screens/NationalExecutiveScreen";
 import { NotFoundScreen } from "@/screens/NotFoundScreen";
 import { OperationsTwinScreen } from "@/screens/OperationsTwinScreen";
 import { PipelineMonitorScreen } from "@/screens/PipelineMonitorScreen";
@@ -24,6 +25,7 @@ import { NAV_ITEMS, type NavItem } from "@/routes/nav";
  * and a screen PR wires itself by adding one entry and flipping `built`.
  */
 const SCREENS: Readonly<Record<string, ComponentType>> = {
+  national: NationalExecutiveScreen,
   operations: OperationsTwinScreen,
   pipeline: PipelineMonitorScreen,
   predictive: PredictiveAnalyticsScreen,
