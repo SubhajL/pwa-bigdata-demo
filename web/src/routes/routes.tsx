@@ -12,6 +12,7 @@ import type { ComponentType } from "react";
 
 import { AppShell } from "@/components/AppShell";
 import { BranchScreen } from "@/screens/BranchScreen";
+import { AiAssistantScreen } from "@/screens/AiAssistantScreen";
 import { AlertCenterScreen } from "@/screens/AlertCenterScreen";
 import { NationalExecutiveScreen } from "@/screens/NationalExecutiveScreen";
 import { NotFoundScreen } from "@/screens/NotFoundScreen";
@@ -39,6 +40,7 @@ const SCREENS: Readonly<Record<string, ComponentType>> = {
   admin: SystemAdminScreen,
   reports: ReportCenterScreen,
   alerts: AlertCenterScreen,
+  assistant: AiAssistantScreen,
 };
 
 /**
