@@ -7,6 +7,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AiSituationCard } from "@/features/national/AiSituationCard";
+import { DataTrustStrip } from "@/features/national/DataTrustStrip";
 import { MonthPicker } from "@/components/MonthPicker";
 import { NationalKpiRow } from "@/features/national/NationalKpiRow";
 import { NationalTrendChart } from "@/features/national/NationalTrendChart";
@@ -106,6 +107,7 @@ function LoadedContent({
           <StatusChip kind="warning" /> แสดงข้อมูลล่าสุดที่ทราบ
         </p>
       )}
+      <DataTrustStrip />
       <NationalKpiRow rollup={data.rollup} series={data.series} />
       <div className="grid gap-4 lg:grid-cols-12">
         <div className="lg:col-span-7">

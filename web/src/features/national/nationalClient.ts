@@ -16,6 +16,7 @@ import {
 import { NATIONAL_CONFIG } from "./national.config";
 import type {
   CuratedMonths,
+  CuratedTrust,
   EconomicsVM,
   NationalDelta,
   NationalSeries,
@@ -37,6 +38,11 @@ export function fetchNational(month: string, signal?: AbortSignal): Promise<Regi
 
 export function fetchNationalSeries(signal?: AbortSignal): Promise<NationalSeries> {
   return getJson<NationalSeries>("/api/curated/national/series", { signal });
+}
+
+/** Provenance & integrity of the REAL curated dataset. Month-independent. */
+export function fetchTrust(signal?: AbortSignal): Promise<CuratedTrust> {
+  return getJson<CuratedTrust>("/api/curated/trust", { signal });
 }
 
 // ── pure reducers ─────────────────────────────────────────────────────────────────────

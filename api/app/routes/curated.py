@@ -13,7 +13,14 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from ..curated import CuratedStore
-from ..models import BranchRow, BranchSeries, CuratedMonths, NationalSeries, RegionRollup
+from ..models import (
+    BranchRow,
+    BranchSeries,
+    CuratedMonths,
+    CuratedTrust,
+    NationalSeries,
+    RegionRollup,
+)
 
 router = APIRouter(prefix="/api/curated", tags=["curated"])
 
@@ -34,6 +41,16 @@ def _store(request: Request) -> CuratedStore:
             detail="curated dataset not available — CURATED_PATH unset or unreadable at startup",
         )
     return store
+
+
+@router.get("/trust", response_model=CuratedTrust, summary="Provenance of the real dataset")
+def curated_trust(request: Request) -> CuratedTrust:
+    """Measured provenance of the curated dataset — source, record/branch/region/month counts,
+    span, and any quarantined rows. Real metadata about real data; never `simulated`.
+
+    A literal path, so it never collides with `/national` or `/regions/{region}`.
+    """
+    return _store(request).trust()
 
 
 @router.get("/months", response_model=CuratedMonths, summary="Months available in the real dataset")

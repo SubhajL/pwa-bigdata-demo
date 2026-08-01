@@ -6,7 +6,7 @@
  */
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/features/national/nationalClient", async (importActual) => {
   const actual = await importActual<typeof import("@/features/national/nationalClient")>();
@@ -15,16 +15,41 @@ vi.mock("@/features/national/nationalClient", async (importActual) => {
     fetchMonths: vi.fn(),
     fetchNational: vi.fn(),
     fetchNationalSeries: vi.fn(),
+    fetchTrust: vi.fn(),
   };
 });
 
-import { fetchMonths, fetchNational, fetchNationalSeries } from "@/features/national/nationalClient";
+import {
+  fetchMonths,
+  fetchNational,
+  fetchNationalSeries,
+  fetchTrust,
+} from "@/features/national/nationalClient";
+import type { CuratedTrust } from "@/features/national/types";
 
 import { NationalExecutiveScreen } from "./NationalExecutiveScreen";
 
 const mMonths = vi.mocked(fetchMonths);
 const mNational = vi.mocked(fetchNational);
 const mSeries = vi.mocked(fetchNationalSeries);
+const mTrust = vi.mocked(fetchTrust);
+
+const TRUST: CuratedTrust = {
+  source: "water_sold_by_branch.csv",
+  record_count: 9126,
+  branch_count: 234,
+  region_count: 10,
+  month_count: 39,
+  first_month: "2022-10",
+  last_month: "2025-12",
+  skipped_rows: 0,
+};
+
+// The data-trust fetch runs on every load; default it so tests that reach LoadedContent don't hang or
+// throw. Individual tests still override the three primary fetches.
+beforeEach(() => {
+  mTrust.mockResolvedValue(TRUST);
+});
 
 function renderScreen(): void {
   render(
@@ -84,6 +109,39 @@ describe("NationalExecutiveScreen", () => {
     const footer = screen.getByRole("contentinfo");
     expect(footer).toHaveTextContent("เป็นค่าจำลอง");
     expect(within(footer).getByText("SIMULATED")).toBeInTheDocument();
+  });
+
+  it("shows the REAL data-trust provenance strip (no SIMULATED marker) once loaded", async () => {
+    mMonths.mockResolvedValue({ months: ["2025-12"], count: 1 });
+    mNational.mockResolvedValue({
+      month: "2025-12",
+      total_m3: 120_999_833.55,
+      branch_count: 234,
+      regions: [{ region: 2, water_sold_m3: 50_000_000, branch_count: 30 }],
+    });
+    mSeries.mockResolvedValue({ points: [{ month: "2025-12", total_m3: 120_999_833.55, branch_count: 234 }] });
+    renderScreen();
+    const strip = await screen.findByTestId("data-trust");
+    expect(strip).toHaveTextContent("ข้อมูลจริงของ กปภ.");
+    expect(strip).toHaveTextContent("234");
+    expect(strip).toHaveTextContent("water_sold_by_branch.csv");
+    // Real data is NOT simulated — the strip must never carry the SIMULATED pill.
+    expect(within(strip).queryByText("SIMULATED")).not.toBeInTheDocument();
+  });
+
+  it("keeps the dashboard when the trust fetch fails (strip absent, data intact)", async () => {
+    mMonths.mockResolvedValue({ months: ["2025-12"], count: 1 });
+    mNational.mockResolvedValue({
+      month: "2025-12",
+      total_m3: 120_999_833.55,
+      branch_count: 234,
+      regions: [{ region: 2, water_sold_m3: 50_000_000, branch_count: 30 }],
+    });
+    mSeries.mockResolvedValue({ points: [{ month: "2025-12", total_m3: 120_999_833.55, branch_count: 234 }] });
+    mTrust.mockRejectedValue(new Error("trust 503"));
+    renderScreen();
+    expect(await screen.findByTestId("national-kpis")).toBeInTheDocument();
+    expect(screen.queryByTestId("data-trust")).not.toBeInTheDocument();
   });
 
   it("binds the month picker to the URL's requested month (no snap-back)", async () => {
