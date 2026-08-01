@@ -45,7 +45,9 @@ describe("NationalKpiRow", () => {
   it("shows the real total and a signed YoY delta on the WATER SOLD tile", () => {
     render(<NationalKpiRow rollup={ROLLUP} series={SERIES} />);
     const tile = within(screen.getByTestId("kpi-water-sold"));
-    expect(tile.getByText(/120,999,834 ลบ.ม./)).toBeInTheDocument();
+    // Numeral and unit are separate nodes (so the big figure never wraps); assert both.
+    expect(tile.getByText("120,999,834")).toBeInTheDocument();
+    expect(tile.getByText("ลบ.ม.")).toBeInTheDocument();
     expect(tile.getByText(/\+21\.0%/)).toBeInTheDocument(); // (121.0 - 100)/100
   });
 });
