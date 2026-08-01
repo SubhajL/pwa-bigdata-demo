@@ -90,6 +90,10 @@ describe("BranchScreen", () => {
     mRegion.mockResolvedValue(LEAGUE);
     renderAt("/branches?branch=5551001&month=2025-12");
     expect(await screen.findByTestId("branch-kpis")).toBeInTheDocument();
+    // The S3 sub-panels (Path D) are wired into the loaded view.
+    expect(screen.getByTestId("branch-peer")).toBeInTheDocument();
+    expect(screen.getByTestId("branch-production")).toBeInTheDocument();
+    expect(screen.getByTestId("branch-forecast")).toBeInTheDocument();
     const footer = screen.getByRole("contentinfo");
     expect(footer).toHaveTextContent("เป็นค่าจำลอง");
     expect(within(footer).getByText("SIMULATED")).toBeInTheDocument();
