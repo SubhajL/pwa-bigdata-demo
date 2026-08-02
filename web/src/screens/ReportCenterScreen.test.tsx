@@ -1,8 +1,12 @@
 /**
  * PR-14 (S6) — the Report Center screen. A proposal-narrative surface with real client-side
- * behaviour and SIMULATED figures: template + filter selection that genuinely SHAPE the preview, a
- * generate→preview flow, honest SIMULATED markers, and the target table's multi-state status. No
- * network is involved.
+ * behaviour and SIMULATED figures: template + filter selection that genuinely SHAPE the preview,
+ * honest SIMULATED markers, and the target table's multi-state status. No network is involved.
+ *
+ * Interaction model (realigned to Stitch S6, which shows a POPULATED preview): the screen LANDS with
+ * a generated default report — never an empty configure-first panel. Filter changes are "pending"
+ * until ประมวลผลรายงาน applies them to the previewed snapshot, which keeps that button a real action
+ * (not inert chrome) and gives every filter change a visible before/after.
  */
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
@@ -13,10 +17,12 @@ import { ReportCenterScreen } from "./ReportCenterScreen";
 
 afterEach(cleanup);
 
-/** Configure nothing, just generate the default report. */
+/** Apply the current (pending) filter selection to the previewed report. */
 function generate(): void {
   fireEvent.click(screen.getByRole("button", { name: /ประมวลผลรายงาน/ }));
 }
+
+const preview = (): HTMLElement => screen.getByTestId("report-preview");
 
 describe("ReportCenterScreen", () => {
   it("renders the heading carrying the nav label synchronously", () => {
@@ -40,69 +46,96 @@ describe("ReportCenterScreen", () => {
     expect(within(checked).getAllByRole("radio").filter((r) => r.getAttribute("aria-checked") === "true")).toHaveLength(1);
   });
 
-  it("holds the preview behind a generate action, then reveals it", () => {
+  it("lands with a generated default report — no configure-first empty state", () => {
     render(<ReportCenterScreen />);
-    expect(screen.getByTestId("report-prompt")).toBeInTheDocument();
-    expect(screen.queryByTestId("report-preview")).not.toBeInTheDocument();
-    generate();
-    expect(screen.getByTestId("report-preview")).toBeInTheDocument();
+    expect(preview()).toBeInTheDocument();
     expect(screen.queryByTestId("report-prompt")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("report-dirty")).not.toBeInTheDocument();
   });
 
-  it("marks the generated report SIMULATED and shows a chart and target table", () => {
+  it("marks the report SIMULATED and shows a chart and target table on load", () => {
     render(<ReportCenterScreen />);
-    generate();
-    const preview = screen.getByTestId("report-preview");
-    expect(within(preview).getByLabelText(SIMULATED_ARIA_LABEL)).toBeInTheDocument();
-    expect(within(preview).getByTestId("target-table")).toBeInTheDocument();
-    expect(within(preview).getByText("แนวโน้มรายไตรมาส (ล้าน ลบ.ม.)")).toBeInTheDocument();
+    expect(within(preview()).getByLabelText(SIMULATED_ARIA_LABEL)).toBeInTheDocument();
+    expect(within(preview()).getByTestId("target-table")).toBeInTheDocument();
+    expect(within(preview()).getByText("แนวโน้มรายไตรมาส (ล้าน ลบ.ม.)")).toBeInTheDocument();
   });
 
   it("draws four quarterly bars with the tallest at full height", () => {
     render(<ReportCenterScreen />);
-    generate();
     const bars = screen.getAllByTestId("quarter-bar");
     expect(bars).toHaveLength(4);
     expect(bars.every((b) => /%$/.test(b.style.height))).toBe(true);
     expect(bars.some((b) => b.style.height === "100%")).toBe(true);
   });
 
-  it("lets the KPI-type chips actually drive which KPI tiles the preview shows", () => {
+  it("holds KPI-type chip changes as pending until ประมวลผลรายงาน applies them", () => {
     render(<ReportCenterScreen />);
-    generate();
-    const preview = screen.getByTestId("report-preview");
-    // Default selection is volume + nrw → energy tile is absent until its chip is turned on.
-    expect(within(preview).getByTestId("report-kpi-volume")).toBeInTheDocument();
-    expect(within(preview).getByTestId("report-kpi-nrw")).toBeInTheDocument();
-    expect(within(preview).queryByTestId("report-kpi-energy")).not.toBeInTheDocument();
+    // Default generated selection is volume + nrw → energy tile absent, no pending marker.
+    expect(within(preview()).getByTestId("report-kpi-volume")).toBeInTheDocument();
+    expect(within(preview()).getByTestId("report-kpi-nrw")).toBeInTheDocument();
+    expect(within(preview()).queryByTestId("report-kpi-energy")).not.toBeInTheDocument();
 
+    // Turning a chip on is PENDING — the preview does not change yet, and the marker appears.
     fireEvent.click(screen.getByRole("button", { name: "พลังงาน" }));
-    expect(within(screen.getByTestId("report-preview")).getByTestId("report-kpi-energy")).toBeInTheDocument();
+    expect(within(preview()).queryByTestId("report-kpi-energy")).not.toBeInTheDocument();
+    expect(screen.getByTestId("report-dirty")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "ปริมาณจำหน่าย" }));
-    expect(within(screen.getByTestId("report-preview")).queryByTestId("report-kpi-volume")).not.toBeInTheDocument();
-  });
-
-  it("reflects the chosen level in the generated report header", () => {
-    render(<ReportCenterScreen />);
+    // Generating applies it and clears the pending marker.
     generate();
-    expect(within(screen.getByTestId("report-preview")).getByText(/ระดับองค์กร/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("radio", { name: "สาขา" }));
-    expect(within(screen.getByTestId("report-preview")).getByText(/ระดับสาขา/)).toBeInTheDocument();
+    expect(within(preview()).getByTestId("report-kpi-energy")).toBeInTheDocument();
+    expect(screen.queryByTestId("report-dirty")).not.toBeInTheDocument();
+
+    // Turning one off applies the same way.
+    fireEvent.click(screen.getByRole("button", { name: "ปริมาณจำหน่าย" }));
+    generate();
+    expect(within(preview()).queryByTestId("report-kpi-volume")).not.toBeInTheDocument();
   });
 
-  it("resets template, filters and preview via สร้างรายงานใหม่", () => {
+  it("holds a level change pending, then reflects it in the report header on generate", () => {
+    render(<ReportCenterScreen />);
+    expect(within(preview()).getByText(/ระดับองค์กร/)).toBeInTheDocument();
+
+    // Pending: the header keeps the GENERATED level (องค์กร) until ประมวลผลรายงาน — this guards
+    // against the preview being wired to the live `level` instead of `generated.level`.
+    fireEvent.click(screen.getByRole("radio", { name: "สาขา" }));
+    expect(within(preview()).getByText(/ระดับองค์กร/)).toBeInTheDocument();
+    expect(within(preview()).queryByText(/ระดับสาขา/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("report-dirty")).toBeInTheDocument();
+
+    generate();
+    expect(within(preview()).getByText(/ระดับสาขา/)).toBeInTheDocument();
+    expect(screen.queryByTestId("report-dirty")).not.toBeInTheDocument();
+  });
+
+  it("holds a template change pending, then reflects it in the report header on generate", () => {
+    render(<ReportCenterScreen />);
+    expect(within(preview()).getByText(/รายงานตามลำดับชั้น/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: /รายงานสรุปผู้บริหาร/ }));
+    // Pending: preview still shows the generated (hierarchical) template; picker shows the new one.
+    expect(within(preview()).getByText(/รายงานตามลำดับชั้น/)).toBeInTheDocument();
+    expect(within(preview()).queryByText(/รายงานสรุปผู้บริหาร/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("report-dirty")).toBeInTheDocument();
+
+    generate();
+    expect(within(preview()).getByText(/รายงานสรุปผู้บริหาร/)).toBeInTheDocument();
+  });
+
+  it("resets template, filters and the generated report via สร้างรายงานใหม่", () => {
     render(<ReportCenterScreen />);
     fireEvent.click(screen.getByRole("radio", { name: /รายงานสรุปผู้บริหาร/ }));
     fireEvent.click(screen.getByRole("button", { name: "พลังงาน" })); // turn energy on
     generate();
-    expect(screen.getByTestId("report-preview")).toBeInTheDocument();
+    expect(within(preview()).getByTestId("report-kpi-energy")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /สร้างรายงานใหม่/ }));
 
-    expect(screen.getByTestId("report-prompt")).toBeInTheDocument();
+    // Back to the default hierarchical template and default KPIs, with a fresh clean preview.
     expect(screen.getByRole("radio", { name: /รายงานตามลำดับชั้น/ })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("button", { name: "พลังงาน" })).toHaveAttribute("aria-pressed", "false");
+    expect(within(preview()).queryByTestId("report-kpi-energy")).not.toBeInTheDocument();
+    expect(within(preview()).getByTestId("report-kpi-volume")).toBeInTheDocument();
+    expect(screen.queryByTestId("report-dirty")).not.toBeInTheDocument();
   });
 
   it("toggles a KPI-type filter chip both ways", () => {
