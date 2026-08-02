@@ -70,3 +70,36 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
       }) as unknown as MediaQueryList,
   });
 }
+
+/**
+ * jsdom in this toolchain exposes NO Web Storage — Node 26 gates its own `localStorage`
+ * behind `--localstorage-file`, and this jsdom build ships none — so anything reading or
+ * writing `localStorage` throws instead of the browser's guaranteed behaviour. Production
+ * code (lib/theme.ts) already degrades in a try/catch, but persistence cannot be ASSERTED
+ * against a missing API. Provide a minimal in-memory implementation, same rationale as the
+ * matchMedia stub above. Each test file gets its own store (setupFiles run per file).
+ */
+if (typeof window !== "undefined" && !window.localStorage) {
+  const store = new Map<string, string>();
+  const memoryStorage = {
+    get length(): number {
+      return store.size;
+    },
+    clear: (): void => {
+      store.clear();
+    },
+    getItem: (key: string): string | null => (store.has(key) ? store.get(key)! : null),
+    key: (index: number): string | null => Array.from(store.keys())[index] ?? null,
+    removeItem: (key: string): void => {
+      store.delete(key);
+    },
+    setItem: (key: string, value: string): void => {
+      store.set(key, String(value));
+    },
+  };
+  Object.defineProperty(window, "localStorage", {
+    writable: true,
+    configurable: true,
+    value: memoryStorage as unknown as Storage,
+  });
+}

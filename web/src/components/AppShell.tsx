@@ -3,6 +3,7 @@ import { Outlet } from "react-router-dom";
 
 import { APP_CONFIG } from "@/config/app.config";
 import { Sidebar } from "@/components/Sidebar";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { Download } from "lucide-react";
 
@@ -55,6 +56,8 @@ export function AppShell(): JSX.Element {
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-outline-variant bg-surface-container-lowest px-6">
           <div className="flex items-center gap-3" />
           <div className="flex items-center gap-2">
+            {/* Overrides the OS colour scheme (light/dark), persisted per-browser. */}
+            <ThemeToggle />
             {/* Export = the browser's print-to-PDF of the current view. A real, honest action (Path D,
                 PR-D2) — no inert chrome; nothing is fabricated, the user gets exactly what is on screen. */}
             <Button variant="outline" size="sm" onClick={() => window.print()}>
