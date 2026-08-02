@@ -107,6 +107,19 @@
   --anim-slow: 400ms;
 }
 
+/* User theme override (components/ThemeToggle). The default above follows the OS; when a
+ * user pins a scheme we stamp `data-theme` on <html> and these pin `color-scheme`, which
+ * re-resolves every `light-dark()` token to that branch. Crucially this redefines NO
+ * `--color-*` token — the palette contract (tokens.test.ts T1) stays single-sourced, and
+ * this is an attribute selector, not a `prefers-color-scheme` block. */
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
 html {
   font-family: var(--font-sans);
 }

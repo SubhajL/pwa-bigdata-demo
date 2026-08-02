@@ -8,6 +8,18 @@
     <!-- Opts the document into both schemes so light-dark() in globals.css resolves and
          the UA paints form controls and scrollbars to match. -->
     <meta name="color-scheme" content="light dark" />
+    <!-- Pre-hydration theme: apply a stored light/dark override before first paint so it
+         never flashes the OS scheme. No stored choice → the document follows the OS via
+         globals.css. Kept in sync by components/ThemeToggle (key: "pwa-theme"). -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("pwa-theme");
+          if (t === "light" || t === "dark")
+            document.documentElement.setAttribute("data-theme", t);
+        } catch (e) {}
+      })();
+    </script>
     <title>PWA Analytics · ระบบวิเคราะห์ข้อมูลขนาดใหญ่</title>
   </head>
   <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
