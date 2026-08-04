@@ -29,7 +29,7 @@ predated the build.
 | 1.5 | Bad Asset ID → DLQ, loop continues (10) | ✅ | PR-1/PR-2, screen PR-8 | `topic1 1.5` |
 | 2.1 | SVG zoom, no blur (5) | ✅ | PR-7 | `topic2 2.1` |
 | 2.2 | Device status auto-updates, no refresh (5) | ✅ (director forces the transition on cue) | PR-7, director #30 | `topic2 2.2` |
-| 2.3 | Pump anomaly + SEC tooltip (10) | ✅ | PR-7 | `topic2 2.3` |
+| 2.3 | Pump anomaly + SEC tooltip (10) | ✅ (induced anomaly + on-screen recomputable derivation) | PR-7, PR-C | `topic2 2.3` + `scenario anomaly` |
 | 2.4 | Pressure drop → pipe highlight + affected customers (10) | ✅ (drop < 2.0 bar) | PR-7 | `topic2 2.4` |
 | 2.5 | Source code: config + ≥3 components (5) | ✅ | PR-0 → PR-7 → PR-9 | `topic2 2.5` |
 | 3.1 | Trained model file + algorithm + params (5) | ✅ | PR-4, `/api/model` PR-9 | `topic3 3.1` |
@@ -39,7 +39,7 @@ predated the build.
 | 3.5 | Prioritized Worklist (5) | ✅ | PR-5, screen PR-9 | `topic3 3.5` |
 | 3.6 | Root Cause Analysis (5) | ✅ | PR-4/PR-5, screen PR-9 | `topic3 3.6` |
 
-**Behavior coverage (what scores): 16/16 demonstrable, verified by `make demo-e2e`** (22 specs incl.
+**Behavior coverage (what scores): 16/16 demonstrable, verified by `make demo-e2e`** (23 specs incl.
 a global SIMULATED-marker check and the demo-director transition specs in
 `scenario-transitions.spec.ts`). Design coverage: 15/16 have a mockup (2.5 needs none — it's the repo).
 

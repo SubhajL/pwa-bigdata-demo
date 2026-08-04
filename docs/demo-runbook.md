@@ -49,10 +49,13 @@ instead — from the twin screen or curl — and the transitions land in seconds
   **Honesty note — what the director actually does:** its rows are inserted directly into
   the database (`api/app/demo.py`); they do **not** traverse the MQTT consumer. Telemetry
   scenarios steer the same tables the real model scores (pairs stamped `source='DEMO'`,
-  swept by **คืนสู่สภาวะปกติ**), and **จำลองข้อมูลเสีย** writes one dead-letter row as a
-  visual (its ledger row is `source='DEMO_DLQ'`, deliberately permanent). The scored
-  item-1.5 validation proof therefore stays `make demo-scenario MODE=bad_asset` — a real
-  publish through the broker that the consumer rejects into the DLQ while ingest continues.
+  swept by **คืนสู่สภาวะปกติ**), and each one also lays a **fresh power/flow pair at
+  `now`** so the item-2.3 SEC derivation is computable the moment you click P-2 (the live
+  simulator's one-signal-per-visit rotation otherwise leaves the newest pair too far
+  apart ~40% of the time). **จำลองข้อมูลเสีย** writes one dead-letter row as a visual
+  (its ledger row is `source='DEMO_DLQ'`, deliberately permanent). The scored item-1.5
+  validation proof therefore stays `make demo-scenario MODE=bad_asset` — a real publish
+  through the broker that the consumer rejects into the DLQ while ingest continues.
   **Accepted exposure:** on the demo stack the API port (8000) is host-published and the
   control is unauthenticated, like every other write surface of this local demo
   (feedback, DLQ browsing). Do not enable `DEMO_CONTROLS` on anything network-shared.
@@ -87,7 +90,7 @@ ordered rows.
 |---|---|---|---|---|
 | 2.1 (5) | click the **ขยายเข้า / ออก** zoom buttons | the SVG schematic | it scales crisply (vector, `viewBox` changes; never blurs) | reset-view button |
 | 2.2 (5) | (live) | device symbols update from the socket | statuses match the live model, no page refresh needed | — |
-| 2.3 (10) | click pump **P-2** | its symbol shape + the SEC card | shape-coded status (not colour alone); **SEC in kWh/m³** with a SIMULATED marker | — |
+| 2.3 (10) | press **จำลองอุปกรณ์เสื่อมสภาพ** (§0b), then click pump **P-2** | its symbol shape + the SEC card | shape-coded status (not colour alone); **SEC in kWh/m³ with its derivation** (กำลังไฟฟ้า ÷ อัตราการไหล, timestamps, pair skew) + SIMULATED marker — the injection lays a fresh pair so the value is computable on cue, and the card refreshes as the status changes; with no recent scenario the live pair can honestly read "—" | **คืนสู่สภาวะปกติ** |
 | 2.4 (10) | click **P-2** while a drop is active | the **ผู้ใช้น้ำที่ได้รับผลกระทบ** card | affected pipes highlighted + a non-empty seeded customer list (SIMULATED-badged) | `make demo-scenario MODE=normal` |
 | 2.5 (5) | open the repo in the IDE | `web/src/features/twin/twin.config.ts` + `DeviceSymbol.tsx`, `PipeEdge.tsx`, `ProcessSchematic.tsx` | one config file + ≥ 3 components | — |
 

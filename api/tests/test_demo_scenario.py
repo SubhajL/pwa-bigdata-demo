@@ -149,6 +149,48 @@ def test_pressure_drop_conserves_and_reports_a_run_id(
     assert after["telemetry"] - before["telemetry"] == body["injected_readings"]
 
 
+def test_scenario_freshens_the_sec_pair_for_item_2_3(
+    client: TestClient, pool: ConnectionPool
+) -> None:
+    """The induced anomaly must make the SEC derivation computable ON CUE (item 2.3).
+
+    The live simulator publishes one signal per device visit, so the pump's newest
+    power/flow pair ages with the round-robin: on the 238-device roster its skew
+    alternates ~95 s / ~143 s, and /api/twin/sec refuses the ~143 s phase (budget 120 s)
+    — an induced anomaly would show an em dash for ~40% of wall-clock time. Every
+    telemetry scenario therefore injects the hour-0 trajectory values for BOTH SEC
+    inputs at `now`, pinning the pair skew to ~0 the moment the button is pressed.
+    """
+    response = client.post("/api/demo/scenario", json={"mode": "anomaly", "target": PUMP})
+    assert response.status_code == 200
+    run_id = response.json()["run_id"]
+    with pool.connection() as conn, conn.cursor() as cur:
+        # Keyed by the run's own instant message_ids — no wall-clock window, so a slow
+        # insert/ANALYZE can never turn this into a timing failure.
+        cur.execute(
+            "SELECT DISTINCT signal FROM telemetry"
+            " WHERE asset_id = %s AND source = 'DEMO' AND message_id LIKE %s",
+            (PUMP, f"{run_id}:instant:%"),
+        )
+        fresh = {row[0] for row in cur.fetchall()}
+    assert {"vibration", "power_kw", "flow_m3h"} <= fresh, (
+        f"scenario must lay a fresh SEC pair at now; got only {sorted(fresh)}"
+    )
+    sec = client.get(f"/api/twin/sec/{PUMP}").json()
+    assert sec["sec_kwh_per_m3"] is not None
+    assert sec["power_kw"] is not None and sec["flow_m3h"] is not None
+    assert sec["skew_s"] is not None and sec["skew_s"] <= 5.0
+
+    # Recovery keeps the derivation computable too: `normal` REPLACES with the healthy
+    # trajectory and its own fresh pair.
+    assert client.post(
+        "/api/demo/scenario", json={"mode": "normal", "target": PUMP}
+    ).status_code == 200
+    sec = client.get(f"/api/twin/sec/{PUMP}").json()
+    assert sec["sec_kwh_per_m3"] is not None
+    assert sec["skew_s"] is not None and sec["skew_s"] <= 5.0
+
+
 def test_pressure_drop_broadcasts_an_instant_below_band_warning(
     client: TestClient,
 ) -> None:

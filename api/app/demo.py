@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import logging
 import zlib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Final, NamedTuple
@@ -166,6 +167,26 @@ def instant_reading(mode: DemoMode) -> tuple[Signal, float]:
     return "pressure_bar", round((low + high) / 2, 4)
 
 
+def _scenario_instants(mode: DemoMode, target: str, wear: float) -> dict[Signal, float]:
+    """The out-of-band readings inserted at `now` — the band transition FIRST, then a
+    fresh SEC pair (item 2.3).
+
+    The pump's newest live power/flow pair ages with the simulator's
+    one-signal-per-visit round-robin — on the demo roster its skew alternates
+    ~95 s / ~143 s, and /api/twin/sec refuses the >120 s phase. Injecting the hour-0
+    trajectory values for BOTH SEC inputs at `now` pins the pair skew to ~0 the moment
+    the scenario is applied; each instant is reserved in its bucket's solve, so every
+    blended mean still lands exactly on the trajectory. Dict order is the insertion
+    contract: the first entry is the primary band reading the twin event broadcasts.
+    """
+    signal, value = instant_reading(mode)
+    instants: dict[Signal, float] = {signal: value}
+    for hours_before, traj_signal, traj_value in trajectory(target, wear):
+        if hours_before == 0 and traj_signal in ("power_kw", "flow_m3h"):
+            instants.setdefault(traj_signal, round(traj_value, 4))
+    return instants
+
+
 class _InjectedReading(NamedTuple):
     ts: datetime
     asset_id: str
@@ -235,16 +256,28 @@ def _replace_scenario(
     not a reset, because the demonstrated pump's backfilled baseline is critical at cold
     start — recovery has to be steered through the same real model path as the faults.
     """
-    signal, value = instant_reading(mode)
+    instants = _scenario_instants(mode, target, wear)
+    signal, value = next(iter(instants.items()))  # the band transition is always first
     rows: list[_InjectedReading]
     with pool.connection() as conn, conn.transaction():
         _acquire_scenario_lock(conn, target)
         removed = _delete_target_demo(conn, target)
         stats = _bucket_stats(conn, target, now)
         rows = _solved_rows(
-            stats, target=target, wear=wear, now=now, run_id=run_id, instant=(signal, value)
+            stats, target=target, wear=wear, now=now, run_id=run_id, instants=instants
         )
-        rows.append(_InjectedReading(now, target, signal, value, f"{run_id}:instant:{signal}"))
+        for offset_ms, (inst_signal, inst_value) in enumerate(instants.items()):
+            # The primary band-transition reading sits at exactly `now`; the SEC pair
+            # trails by milliseconds so all three stay newest-per-signal in this bucket.
+            rows.append(
+                _InjectedReading(
+                    now - timedelta(milliseconds=offset_ms),
+                    target,
+                    inst_signal,
+                    inst_value,
+                    f"{run_id}:instant:{inst_signal}",
+                )
+            )
         _insert_pairs(conn, rows, run_id)
     _analyze(pool)
     logger.info(
@@ -327,22 +360,20 @@ def _solved_rows(
     wear: float,
     now: datetime,
     run_id: str,
-    instant: tuple[Signal, float] | None = None,
+    instants: Mapping[Signal, float] | None = None,
 ) -> list[_InjectedReading]:
     """Solved injections steering every (bucket, signal) mean onto the trajectory. Pure.
 
-    `instant` is the out-of-band reading the caller will ALSO insert at `now`; its
-    bucket's solve reserves it so the final blended mean still lands on trajectory.
+    `instants` are the out-of-band readings (at most one per signal) the caller will ALSO
+    insert at `now`; each one's bucket solve reserves it so the final blended mean still
+    lands on trajectory.
     """
     end_hour = now.replace(minute=0, second=0, microsecond=0)
     rows: list[_InjectedReading] = []
     for hours_before, signal, value in trajectory(target, wear):
         bucket = end_hour - timedelta(hours=hours_before)
         n, mean = stats.get((bucket, signal), (0, None))
-        reserved = (
-            instant[1] if instant is not None and hours_before == 0 and signal == instant[0]
-            else None
-        )
+        reserved = instants.get(signal) if instants is not None and hours_before == 0 else None
         k, x = solve_injection(n, mean, value, reserved=reserved)
         for j in range(k):
             # Millisecond stagger keeps every row inside its clock-hour bucket while

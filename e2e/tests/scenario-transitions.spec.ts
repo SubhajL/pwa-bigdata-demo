@@ -106,9 +106,13 @@ test("P1 — pressure_drop transitions the SAME loaded twin: band stage, pipes, 
 
   // Model stage: `critical` is unreachable from a pressure band frame, so observing it
   // is observing the scoring loop's health broadcast — within the item-3.3 budget,
-  // measured from the injection on a real clock.
-  const remaining = Math.max(30_000 - (Date.now() - injectedAt), 1_000);
+  // measured from the injection on a real clock. STRICT (PR-C): the poll gets exactly
+  // the remaining budget — no floor — and the elapsed time is asserted afterwards, so a
+  // transition at 30,001 ms fails.
+  const remaining = 30_000 - (Date.now() - injectedAt);
+  expect(remaining, "the band/impact waits must not pre-spend the 30 s budget").toBeGreaterThan(0);
   await expect.poll(() => p2Dom(page), { timeout: remaining }).toBe("critical");
+  expect(Date.now() - injectedAt, "critical rendered within 30.000 s of the POST").toBeLessThanOrEqual(30_000);
 
   // The recorded DOM history proves BOTH attributable stages were rendered, in order:
   // the band frame's warning first, the model's critical last.
@@ -134,13 +138,74 @@ test("P1 — normal recovers the same DOM: symbol back to normal, highlights and
   const resetAt = Date.now();
   await postScenario("normal");
   // The in-band pressure frame clears the drop immediately; the health recovery frame
-  // (critical → normal) lands within a scoring cycle. Both reach the SAME loaded page,
-  // inside the same ≤30s budget the runbook advertises for the model path.
+  // (critical → normal) lands within a scoring cycle. Both reach the SAME loaded page.
+  // STRICT (PR-C): recovery obeys the same 30.000 s budget the runbook advertises for
+  // the model path — a recovery observed at 30,001 ms fails.
   await expect.poll(() => p2Dom(page), { timeout: 30_000 }).toBe("normal");
-  expect(Date.now() - resetAt).toBeLessThanOrEqual(31_000);
+  expect(Date.now() - resetAt, "recovery rendered within 30.000 s of the reset POST").toBeLessThanOrEqual(30_000);
   await expect.poll(() => page.locator('[data-affected="true"]').count(), { timeout: 15_000 }).toBe(0);
   await expect(page.getByText("ไม่มีเหตุแรงดันตกในขณะนี้")).toBeVisible();
   await assertNotReloaded(page);
+});
+
+test("P1 — anomaly drives the model path ≤30s and the SEC derivation on screen is recomputable", async ({ page }) => {
+  await openTwin(page);
+  await resetToNormal(page);
+
+  const injectedAt = Date.now();
+  await postScenario("anomaly");
+  // Item 2.3 induced + item 3.3 strict clock: the anomaly (a distinct scenario from
+  // pressure_drop — vibration-led, no impact join) must render `critical` on the same
+  // DOM within 30.000 s of the POST. No floor: a 30,001 ms transition fails.
+  const remaining = 30_000 - (Date.now() - injectedAt);
+  expect(remaining, "the budget must not be pre-spent before polling").toBeGreaterThan(0);
+  await expect.poll(() => p2Dom(page), { timeout: remaining }).toBe("critical");
+  expect(Date.now() - injectedAt, "critical rendered within 30.000 s").toBeLessThanOrEqual(30_000);
+
+  // Click the demonstrated pump: the SEC card must expose a derivation the judge can
+  // RECOMPUTE — inputs, timestamps, pair skew, and the quotient (scored item 2.3).
+  await page.locator(P2).click();
+  const card = page.getByTestId("sec-card");
+  await expect(card).toBeVisible();
+  await pollUntil(async () => (await card.getAttribute("data-sec")) != null, {
+    timeoutMs: 15_000,
+    label: "SEC derivation attributes rendered for the selected pump",
+  });
+  const attr = async (name: string): Promise<number> => Number(await card.getAttribute(name));
+  const secShown = await attr("data-sec");
+  const power = await attr("data-power-kw");
+  const flow = await attr("data-flow-m3h");
+  const skew = await attr("data-skew-s");
+  expect(Number.isFinite(secShown) && Number.isFinite(power) && Number.isFinite(flow)).toBe(true);
+  // data-skew-s must be PRESENT and finite — Number(null) is 0, which would let an
+  // absent attribute satisfy the budget check vacuously.
+  expect(Number.isFinite(skew), "data-skew-s present and finite").toBe(true);
+  expect(flow).toBeGreaterThan(0);
+  // Recomputable: the shown result IS the quotient of the shown inputs.
+  expect(Math.abs(secShown - power / flow)).toBeLessThanOrEqual(1e-9 * Math.max(1, secShown));
+  // The pair the card used respects the API's freshness budget (TWIN_MAX_PAIR_SKEW_S).
+  expect(skew).toBeLessThanOrEqual(120);
+  await expect(page.getByTestId("sec-formula")).toBeVisible();
+  await expect(page.getByTestId("sec-observed")).toBeVisible();
+
+  // The API derives by the same rule — the card renders the contract, not its own math.
+  const api = await apiJson<{
+    sec_kwh_per_m3: number | null;
+    power_kw: number | null;
+    flow_m3h: number | null;
+    skew_s: number | null;
+  }>("/api/twin/sec/P-2");
+  expect(api.sec_kwh_per_m3, "API returns a computed SEC during the anomaly").not.toBeNull();
+  expect(api.power_kw).not.toBeNull();
+  expect(api.flow_m3h).not.toBeNull();
+  expect(
+    Math.abs((api.sec_kwh_per_m3 as number) - (api.power_kw as number) / (api.flow_m3h as number)),
+  ).toBeLessThanOrEqual(1e-9);
+
+  await assertNotReloaded(page);
+  // Deliberately NO reset here: the later on-screen control test resetToNormal()s before
+  // applying pressure_drop, so the suite still ends degraded via pressure_drop exactly as
+  // the header contract documents.
 });
 
 test("P0 — bad_asset dead-letters exactly one message and ingest keeps flowing", async () => {

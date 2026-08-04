@@ -164,8 +164,14 @@ export function OperationsTwinScreen(): JSX.Element {
 
   // SEC for the selected device; a newer selection supersedes the previous. Again, setState
   // only in the async callback; loading is derived from whether `sec` is for `selected`.
+  // `selectedStatus` is a dependency ON PURPOSE (PR-C, item 2.3): re-clicking the selected
+  // symbol is a React state no-op, so when an induced fault or recovery flips the SELECTED
+  // device's rendered status, the card must refetch by itself — the judge watches the
+  // symbol change and the derivation follow, on one page.
+  const selectedStatus = selected != null ? statusOf(selected) : null;
   const secReq = useRef(0);
   useEffect(() => {
+    void selectedStatus;
     const token = ++secReq.current;
     if (selected == null) return;
     void (async (): Promise<void> => {
@@ -176,7 +182,7 @@ export function OperationsTwinScreen(): JSX.Element {
         if (token === secReq.current) setSec(null);
       }
     })();
-  }, [selected]);
+  }, [selected, selectedStatus]);
 
   // Render-derived: show impact/affected only while a drop is active AND the fetched impact is
   // for that asset (so a cleared or superseded drop shows nothing, with no reset-setState).

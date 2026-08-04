@@ -250,6 +250,36 @@ describe("R9 — structure: config file + ≥3 components", () => {
   });
 });
 
+describe("R13b — the SEC card follows the selected device's status (PR-C, item 2.3)", () => {
+  it("refetches SEC when the selected pump's rendered status changes — no re-click needed", async () => {
+    stubFetch();
+    // Count fetches by URL on top of the stub: re-clicking the same symbol is a state
+    // no-op in React, so the ONLY way the card can follow an induced fault is a
+    // status-driven refetch.
+    const stubbed = globalThis.fetch;
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", (input: RequestInfo | URL): Promise<Response> => {
+      calls.push(String(input));
+      return (stubbed as (i: RequestInfo | URL) => Promise<Response>)(input);
+    });
+    await mountLoaded();
+    act(() => sockets[0].open());
+    act(() => document.querySelector('[data-asset="P-2"]')!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    await screen.findByText(/kWh\/m³/);
+    const secCalls = (): number => calls.filter((u) => u.includes("/sec/")).length;
+    const before = secCalls();
+    expect(before).toBeGreaterThanOrEqual(1);
+    // A health frame that CHANGES the rendered status (fixture baseline is `critical`)
+    // must refresh the card.
+    act(() => sockets[0].send({ kind: "health", asset_id: "P-2", status: "warning" }));
+    await waitFor(() => expect(secCalls()).toBeGreaterThan(before));
+    // …and recovery refreshes it again (warning → normal).
+    const afterFault = secCalls();
+    act(() => sockets[0].send({ kind: "health", asset_id: "P-2", status: "normal" }));
+    await waitFor(() => expect(secCalls()).toBeGreaterThan(afterFault));
+  });
+});
+
 describe("R10 — honesty markers on synthetic values", () => {
   it("marks the SEC, the counters and the impact panel as SIMULATED", async () => {
     stubFetch();
