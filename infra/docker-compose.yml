@@ -109,6 +109,10 @@ services:
       # Blank => discover the artifact baked into the image at /srv/artifacts/model.pkl.
       MODEL_PATH: ""
       SCORING_ENABLED: "1"       # S6: the periodic scoring pass (item 3.3)
+      # P0: the demo-scenario director (POST /api/demo/scenario). Default OFF in the
+      # Settings class; ONLY this demo stack turns it on, so the injection surface
+      # cannot exist on a production path.
+      DEMO_CONTROLS: "1"
       # PR-6: the REAL curated dataset. The image does NOT bake `data/` in (the build
       # context is the repo root, but data/ is deliberately excluded), so it is
       # bind-mounted exactly as `seed` and `simulator` already do.
