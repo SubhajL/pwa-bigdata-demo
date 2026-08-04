@@ -193,6 +193,57 @@ describe("T16 RetrievalEvidence", () => {
 });
 
 // ── T17 KpiRow ────────────────────────────────────────────────────────────────────────
+// ── T18 machine-readable judge evidence (PR-B) ───────────────────────────────────────
+// The Playwright score gate reads exact values off the open /pipeline DOM. Formatted text
+// (Thai locale separators, "—") is not machine-safe, so evidence carriers expose stable
+// data-* attributes; a tile with no honest value exposes NO attribute (never a fake 0).
+describe("T18 judge-evidence attributes", () => {
+  it("rt-row exposes per-endpoint path/count/failures/mean for the browser gate", () => {
+    render(
+      <ResponseTimeTable
+        budgetMs={500}
+        summaries={[
+          sum({ path: "/a", meanMs: 3.4 }),
+          sum({ path: "/c", meanMs: 0, count: 0, failures: 5, underBudget: false }),
+        ]}
+      />,
+    );
+    const rows = screen.getAllByTestId("rt-row");
+    expect(rows[0]).toHaveAttribute("data-path", "/a");
+    expect(rows[0]).toHaveAttribute("data-count", "5");
+    expect(rows[0]).toHaveAttribute("data-failures", "0");
+    expect(parseFloat(rows[0].getAttribute("data-mean-ms") ?? "")).toBeCloseTo(3.4);
+    // an all-failed endpoint has no honest mean — the attribute must be absent, not 0
+    expect(rows[1]).toHaveAttribute("data-failures", "5");
+    expect(rows[1]).not.toHaveAttribute("data-mean-ms");
+  });
+  it("KPI tiles expose data-value; disabled ingest exposes none (matches the — rule)", () => {
+    const { rerender } = render(<KpiRow status={enabled()} rates={[10]} summaries={[sum({ path: "/a" })]} />);
+    expect(screen.getByTestId("kpi-rows")).toHaveAttribute("data-value", "1935");
+    expect(screen.getByTestId("kpi-dlq")).toHaveAttribute("data-value", "58");
+    rerender(<KpiRow status={{ state: "disabled", detail: "off" }} rates={[]} summaries={[]} />);
+    expect(screen.getByTestId("kpi-rows")).not.toHaveAttribute("data-value");
+    expect(screen.getByTestId("kpi-dlq")).not.toHaveAttribute("data-value");
+  });
+  it("DlqTable exposes the all-runs total machine-readably", () => {
+    render(<DlqTable page={dlqPage} total={58} offset={0} loading={false} onPrev={() => {}} onNext={() => {}} />);
+    expect(screen.getByTestId("dlq-total")).toHaveAttribute("data-value", "58");
+  });
+  it("range rows expose data-ts so RENDERED historical ordering is provable (item 1.4)", () => {
+    const range: RangeResponse = {
+      asset_id: "P-2", window_minutes: 15, count: 2,
+      readings: [
+        { ts: "2026-07-30T10:00:00Z", signal: "pressure_bar", value: 1, run_id: "r" },
+        { ts: "2026-07-30T10:01:00Z", signal: "pressure_bar", value: 2, run_id: "r" },
+      ],
+    };
+    render(<RetrievalEvidence range={range} />);
+    const rows = screen.getAllByTestId("range-row");
+    expect(rows[0]).toHaveAttribute("data-ts", "2026-07-30T10:00:00Z");
+    expect(rows[1]).toHaveAttribute("data-ts", "2026-07-30T10:01:00Z");
+  });
+});
+
 describe("T17 KpiRow", () => {
   it("derives every tile, excludes failed endpoints from latency, badges each simulated tile", () => {
     const failed = sum({ path: "/b", meanMs: 0, count: 0, failures: 5, underBudget: false });

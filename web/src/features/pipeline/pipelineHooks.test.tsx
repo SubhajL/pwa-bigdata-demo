@@ -22,7 +22,7 @@ import { fetchDlq, fetchPipelineStatus, fetchRange, probeLatency } from "./pipel
 import { pushSample } from "./usePipelineStatus";
 import { runProbeRound } from "./useLatencyProbe";
 import { usePipelineStatus } from "./usePipelineStatus";
-import { useDlq } from "./useDlq";
+import { useDlq, useDlqLiveRefresh, type UseDlqResult } from "./useDlq";
 import { useRange } from "./useRange";
 
 const mFetchStatus = vi.mocked(fetchPipelineStatus);
@@ -121,5 +121,51 @@ describe("useRange", () => {
     const { result } = renderHook(() => useRange());
     await act(async () => {});
     expect(result.current.data?.count).toBe(2);
+  });
+});
+
+// ── useDlqLiveRefresh (PR-B, item 1.5 same-DOM visibility) ────────────────────────────
+describe("useDlqLiveRefresh", () => {
+  function dlqResult(over: Partial<UseDlqResult> = {}): UseDlqResult {
+    return {
+      page: null, offset: 0, loading: false, error: null, stale: false,
+      setOffset: () => {}, reload: () => {}, ...over,
+    };
+  }
+
+  it("reloads page 0 when the live total changes — never on the first arrival", () => {
+    const reload = vi.fn();
+    const { rerender } = renderHook(
+      ({ total, dlq }: { total: number | null; dlq: UseDlqResult }) => useDlqLiveRefresh(dlq, total),
+      { initialProps: { total: 5 as number | null, dlq: dlqResult({ reload }) } },
+    );
+    expect(reload).not.toHaveBeenCalled(); // first arrival is not a change
+    rerender({ total: 5, dlq: dlqResult({ reload }) });
+    expect(reload).not.toHaveBeenCalled(); // unchanged total
+    rerender({ total: 6, dlq: dlqResult({ reload }) });
+    expect(reload).toHaveBeenCalledTimes(1); // a dead letter landed → page 0 refetch
+  });
+
+  it("never reloads while the operator is off page 0", () => {
+    const reload = vi.fn();
+    const { rerender } = renderHook(
+      ({ total, dlq }: { total: number | null; dlq: UseDlqResult }) => useDlqLiveRefresh(dlq, total),
+      { initialProps: { total: 5 as number | null, dlq: dlqResult({ reload, offset: 25 }) } },
+    );
+    rerender({ total: 9, dlq: dlqResult({ reload, offset: 25 }) });
+    expect(reload).not.toHaveBeenCalled(); // browsing history is never yanked back
+  });
+
+  it("coalesces changes during an in-flight request into ONE follow-up reload", () => {
+    const reload = vi.fn();
+    const { rerender } = renderHook(
+      ({ total, dlq }: { total: number | null; dlq: UseDlqResult }) => useDlqLiveRefresh(dlq, total),
+      { initialProps: { total: 5 as number | null, dlq: dlqResult({ reload, loading: true }) } },
+    );
+    rerender({ total: 6, dlq: dlqResult({ reload, loading: true }) }); // change mid-flight
+    rerender({ total: 7, dlq: dlqResult({ reload, loading: true }) }); // another change
+    expect(reload).not.toHaveBeenCalled(); // no abort-storm: in-flight page left to settle
+    rerender({ total: 7, dlq: dlqResult({ reload, loading: false }) }); // request settled
+    expect(reload).toHaveBeenCalledTimes(1); // exactly one catch-up refetch
   });
 });

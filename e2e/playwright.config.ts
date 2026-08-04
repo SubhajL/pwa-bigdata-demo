@@ -5,8 +5,9 @@ import { defineConfig, devices } from "@playwright/test";
  *
  * SERIALIZED on purpose (`workers: 1`, `fullyParallel: false`): the specs share ONE mutable
  * simulator (FAULT_MODE) and ONE persistent database. Parallel workers would race on that shared
- * state. Scenario specs reset FAULT_MODE→normal and use delta-based counters so residual data from
- * an earlier spec cannot make a later one pass or fail spuriously.
+ * state. Specs use delta-based counters where residual data could mislead; the scenario suite
+ * deliberately ends with P-2 degraded (see scenario-transitions.spec.ts's header), the warm state
+ * the later topic2/topic3 specs expect.
  */
 export default defineConfig({
   testDir: "./tests",

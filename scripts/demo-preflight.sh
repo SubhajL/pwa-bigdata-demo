@@ -63,6 +63,26 @@ check "topic ๓ · model card"        "$API/api/model"
 check "Swagger UI (item 3.4)"       "$API/docs"
 check "frontend"                    "$WEB/"
 
+# Item 1.4 catalog evidence: telemetry must live in a REAL TimescaleDB hypertable, proven
+# from the catalog (timescaledb_information), not inferred from API behavior. Read-only.
+# Bounded like every other probe (in-container busybox `timeout`): a wedged Postgres must
+# not hang the whole gate. An exec/psql FAILURE is reported as exactly that — only a real
+# empty catalog result may claim "not a hypertable".
+if chunks=$("${COMPOSE[@]}" exec -T timescaledb timeout 8 psql -U pwa -d pwa -tA \
+  -c "SELECT num_chunks FROM timescaledb_information.hypertables WHERE hypertable_name='telemetry'" \
+  2>/dev/null); then
+  if [ -n "${chunks:-}" ]; then
+    printf '  ✓ %-34s hypertable, %s chunk(s)\n' "topic ๑ · TimescaleDB catalog" "$chunks"
+  else
+    printf '  ✗ %-34s (telemetry is NOT a hypertable per the catalog)\n' "topic ๑ · TimescaleDB catalog"
+    FAILED=1
+  fi
+else
+  printf '  ✗ %-34s (catalog probe failed — container/psql error, not a schema verdict)\n' \
+    "topic ๑ · TimescaleDB catalog"
+  FAILED=1
+fi
+
 # Deeper readiness: the model must have produced at least one score (else topic ๓ is blank).
 scored=$("${CURL[@]}" "$API/api/worklist?limit=50" 2>/dev/null \
   | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)
