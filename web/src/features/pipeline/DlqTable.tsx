@@ -74,7 +74,11 @@ export function DlqTable({ page, total, offset, loading, error, onPrev, onNext }
         <CardTitle className="flex items-center gap-2">
           Dead-Letter Queue
           {total != null && (
-            <span className="text-dense font-normal text-on-surface-variant">
+            <span
+              data-testid="dlq-total"
+              data-value={total}
+              className="text-dense font-normal text-on-surface-variant"
+            >
               (ทั้งหมด {total})
             </span>
           )}

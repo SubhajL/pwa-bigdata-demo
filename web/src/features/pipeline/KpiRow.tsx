@@ -95,7 +95,9 @@ function KpiTile({
   readonly note?: string;
 }): JSX.Element {
   return (
-    <Card data-testid={testId} className="flex flex-col gap-2 p-4">
+    // data-value: machine-readable evidence for the E2E score gate; absent when the honest
+    // display is "—" so automation can never mistake unknown for zero.
+    <Card data-testid={testId} data-value={value ?? undefined} className="flex flex-col gap-2 p-4">
       <div className="flex items-center justify-between">
         <span className="text-dense text-on-surface-variant">{label}</span>
         {badge != null && badge}

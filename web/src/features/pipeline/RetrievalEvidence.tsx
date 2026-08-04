@@ -63,6 +63,7 @@ export function RetrievalEvidence({ range, loading, error }: RetrievalEvidencePr
                     <tr
                       key={`${r.ts}-${i}`}
                       data-testid="range-row"
+                      data-ts={r.ts}
                       className="border-b border-outline-variant last:border-0"
                     >
                       <td className="px-3 py-2 font-mono text-on-surface">

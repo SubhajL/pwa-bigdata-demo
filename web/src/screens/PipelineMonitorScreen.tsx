@@ -15,7 +15,7 @@ import { ResponseTimeTable } from "@/features/pipeline/ResponseTimeTable";
 import { RetrievalEvidence } from "@/features/pipeline/RetrievalEvidence";
 import { computeIngestRate } from "@/features/pipeline/pipelineClient";
 import { PIPELINE_CONFIG } from "@/features/pipeline/pipeline.config";
-import { useDlq } from "@/features/pipeline/useDlq";
+import { useDlq, useDlqLiveRefresh } from "@/features/pipeline/useDlq";
 import { useLatencyProbe } from "@/features/pipeline/useLatencyProbe";
 import { usePipelineStatus } from "@/features/pipeline/usePipelineStatus";
 import { useRange } from "@/features/pipeline/useRange";
@@ -52,6 +52,8 @@ export function PipelineMonitorScreen(): JSX.Element {
     status != null && status.state !== "disabled" ? status.conservation : undefined;
   const dlqTotal = conservation?.dead_letter ?? null;
   const staleTime = lastAt != null ? new Date(lastAt).toLocaleTimeString("th-TH") : null;
+
+  useDlqLiveRefresh(dlq, dlqTotal);
 
   return (
     <div className="flex flex-col gap-4" data-testid="pipeline-monitor">

@@ -20,6 +20,8 @@ LIMIT 5;
 
 \echo ''
 \echo '── 3. a bounded time-range retrieval returns rows, newest first (item 1.4) ──'
+\echo '   (operator inspection reads newest-first; the API range read for charts returns'
+\echo '    the same window ASCENDING — see /api/telemetry/{asset}/range)'
 SELECT asset_id, signal, round(value::numeric, 3) AS value, ts
 FROM telemetry
 WHERE ts > now() - interval '15 minutes'

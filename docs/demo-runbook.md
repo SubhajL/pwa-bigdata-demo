@@ -67,10 +67,10 @@ This retires the cold-start timing constraint below: on a warm stack, press
 | # | Trigger | Where to look | Expect | Reset |
 |---|---|---|---|---|
 | 1.1 (5) | (always on) | `/pipeline` → connection pill + throughput KPI | pill **CONNECTED**, msg/s > 0 and rising | — |
-| 1.2 (5) | `make demo-reconnect` (restarts broker) | terminal + `/pipeline` connection pill | script prints **reconnected … ≤ 30s** (typically ~1–2s); pill drops then returns CONNECTED | auto |
-| 1.3 (5) | open DevTools → **Network**, filter `latest`, reload `/pipeline` | the `/api/telemetry/P-2/latest` row → **Timing** + `Server-Timing: db;dur=…`; on-screen Response-Time table | round-trip **< 500 ms**, a row marked *under budget* | — |
-| 1.4 (10) | — | `scripts/show-hypertable.sql` (below) + `/pipeline` retrieval panel | hypertable confirmed; 15-min range returns ordered rows | — |
-| 1.5 (10) | `make demo-scenario MODE=bad_asset` | `/pipeline` → DLQ table + conservation | **DLQ total grows**, ingest keeps rising (loop not stalled) | `make demo-scenario MODE=normal` |
+| 1.2 (5) | `make demo-reconnect` (restarts broker) | terminal + `/pipeline` connection pill | script prints **reconnected AND committed ingest resumed … ≤ 30s** (typically ~1–2s); pill drops then returns CONNECTED | auto |
+| 1.3 (5) | open DevTools → **Network**, filter `latest`, reload `/pipeline` | the `/api/telemetry/P-2/latest` row → **Timing** + `Server-Timing: db;dur=…`; on-screen Response-Time table | round-trip **< 500 ms**; **all three** endpoint rows complete 5/5 calls, zero failures, means ≤ 500 ms, each marked *under budget* | — |
+| 1.4 (10) | — | `scripts/show-hypertable.sql` (below) + `/pipeline` retrieval panel; `make demo-preflight` prints the catalog line | hypertable confirmed from the TimescaleDB catalog; 15-min range returns ordered rows | — |
+| 1.5 (10) | `make demo-scenario MODE=bad_asset` | `/pipeline` → DLQ table + conservation | **DLQ total grows** and the unknown-ID row appears in the table **without a refresh** (in this mode every simulated envelope is bad, so committed rows pause); after `MODE=normal`, committed rows rise again — the loop was never stalled | `make demo-scenario MODE=normal` |
 
 **Item 1.4 SQL** (run in a second terminal):
 ```bash

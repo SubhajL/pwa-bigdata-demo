@@ -55,6 +55,10 @@ export function ResponseTimeTable({ summaries, budgetMs }: ResponseTimeTableProp
                 <tr
                   key={s.path}
                   data-testid="rt-row"
+                  data-path={s.path}
+                  data-count={s.count}
+                  data-failures={s.failures}
+                  data-mean-ms={s.count === 0 ? undefined : s.meanMs}
                   className="border-b border-outline-variant last:border-0"
                 >
                   <td className="px-3 py-2 font-medium text-on-surface">{s.path}</td>
