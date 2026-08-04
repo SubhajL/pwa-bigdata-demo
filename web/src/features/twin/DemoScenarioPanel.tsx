@@ -25,8 +25,13 @@ const SCENARIOS: ReadonlyArray<{ mode: DemoMode; label: string }> = [
  * `{enabled: true}` (the API is env-gated by DEMO_CONTROLS, so a production-shaped stack
  * simply never shows this), it carries the SIMULATED marker like every other synthetic
  * surface, and it prints the active run_id so each injection is traceable to the exact
- * rows it wrote. The twin itself is NOT touched from here — the injected readings travel
- * the same MQTT-consumer/scoring paths as real telemetry, which is the point.
+ * rows it wrote. The twin itself is NOT touched from here — rows are inserted directly
+ * into the database (`api/app/demo.py`): telemetry scenarios steer the same tables the
+ * real scoring loop reads (ledger+telemetry pairs stamped `source='DEMO'`, swept by
+ * `normal`), and `bad_asset` writes one dead-letter row as a demo visual (its ledger row
+ * is `source='DEMO_DLQ'`, deliberately permanent). Nothing here traverses the MQTT
+ * consumer — the scored item-1.5 validation proof stays the simulator's real publish
+ * (`make demo-scenario MODE=bad_asset`).
  */
 export function DemoScenarioPanel({ target = "P-2" }: DemoScenarioPanelProps): JSX.Element | null {
   const [status, setStatus] = useState<DemoStatus | null>(null);

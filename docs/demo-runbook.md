@@ -8,13 +8,16 @@ Swagger `http://localhost:8000/docs`.
 
 ---
 
-## 0. Cold start (once, ~2–3 min)
+## 0. Stack readiness (once, ~2–3 min)
 
 ```bash
 make demo-preflight          # brings the stack up, waits healthy, checks every scored surface
 ```
-It must end with **`✓ DEMO READY`**. If not, it prints which surface failed. To run the whole
-automated gate instead (all 16 items in a real browser): `make demo-e2e`.
+It must end with **`✓ DEMO READY`**. If not, it prints which surface failed. Preflight warms
+the **existing** stack — volumes are preserved, so it is not a cold start by itself. A **true
+cold start** (fresh volumes → re-seed → re-backfill) is `make demo-down` **then**
+`make demo-preflight`. To run the whole automated gate instead (all 16 items in a real
+browser): `make demo-e2e`.
 
 Reset the fault mode any time with `make demo-scenario MODE=normal`.
 
@@ -29,8 +32,10 @@ instead — from the twin screen or curl — and the transitions land in seconds
 * On **ศูนย์ควบคุม SCADA** (`/operations`), the **สาธิตเหตุการณ์** card (SIMULATED-badged,
   right column) has four buttons: **จำลองแรงดันตก** (pressure drop → items 2.2/2.3/2.4/3.3
   from one click), **จำลองอุปกรณ์เสื่อมสภาพ** (vibration anomaly), **จำลองข้อมูลเสีย (DLQ)**
-  (item 1.5), **คืนสู่สภาวะปกติ** (recovery). The card shows the active **run_id**; every
-  injected row in the database carries it (`source='DEMO'`).
+  (a direct demo DLQ insert — a fast visual, **not** the scored item-1.5 proof; see the
+  honesty note below), **คืนสู่สภาวะปกติ** (recovery). The card shows the active **run_id**;
+  every injected row in the database carries it (`source='DEMO'` for telemetry scenarios,
+  `'DEMO_DLQ'` for the dead-letter pair's ledger row).
 * Same thing over HTTP:
   `curl -X POST localhost:8000/api/demo/scenario -H 'content-type: application/json' -d '{"mode":"pressure_drop","target":"P-2"}'`
 * What a fault does: one below-band reading flips P-2's symbol to **เฝ้าระวัง instantly**
@@ -41,6 +46,13 @@ instead — from the twin screen or curl — and the transitions land in seconds
 * Gated by `DEMO_CONTROLS=1` (set only in `infra/docker-compose.yml`); anywhere else the
   endpoint answers 403 and the card does not render. Injections preserve the conservation
   invariant (paired ledger rows) and never touch MQTT/BACKFILL rows.
+  **Honesty note — what the director actually does:** its rows are inserted directly into
+  the database (`api/app/demo.py`); they do **not** traverse the MQTT consumer. Telemetry
+  scenarios steer the same tables the real model scores (pairs stamped `source='DEMO'`,
+  swept by **คืนสู่สภาวะปกติ**), and **จำลองข้อมูลเสีย** writes one dead-letter row as a
+  visual (its ledger row is `source='DEMO_DLQ'`, deliberately permanent). The scored
+  item-1.5 validation proof therefore stays `make demo-scenario MODE=bad_asset` — a real
+  publish through the broker that the consumer rejects into the DLQ while ingest continues.
   **Accepted exposure:** on the demo stack the API port (8000) is host-published and the
   control is unauthenticated, like every other write surface of this local demo
   (feedback, DLQ browsing). Do not enable `DEMO_CONTROLS` on anything network-shared.
@@ -76,7 +88,7 @@ ordered rows.
 | 2.1 (5) | click the **ขยายเข้า / ออก** zoom buttons | the SVG schematic | it scales crisply (vector, `viewBox` changes; never blurs) | reset-view button |
 | 2.2 (5) | (live) | device symbols update from the socket | statuses match the live model, no page refresh needed | — |
 | 2.3 (10) | click pump **P-2** | its symbol shape + the SEC card | shape-coded status (not colour alone); **SEC in kWh/m³** with a SIMULATED marker | — |
-| 2.4 (10) | click **P-2** while a drop is active | the **ผู้ใช้น้ำที่ได้รับผลกระทบ** card | affected pipes highlighted + a real, non-zero customer list | `make demo-scenario MODE=normal` |
+| 2.4 (10) | click **P-2** while a drop is active | the **ผู้ใช้น้ำที่ได้รับผลกระทบ** card | affected pipes highlighted + a non-empty seeded customer list (SIMULATED-badged) | `make demo-scenario MODE=normal` |
 | 2.5 (5) | open the repo in the IDE | `web/src/features/twin/twin.config.ts` + `DeviceSymbol.tsx`, `PipeEdge.tsx`, `ProcessSchematic.tsx` | one config file + ≥ 3 components | — |
 
 > **✔ Demo-data tuning (2.2 / 2.4), PR-7 — landed 2026-08-01.** Pump **P-2 now backfills to
@@ -114,4 +126,5 @@ ordered rows.
 make demo-e2e     # runs all 16 items in a real browser against the live stack (~1 min)
 ```
 Green = every scored behaviour is demonstrable. Spec ids map 1:1 to the rows above
-(`e2e/tests/topic{1,2,3}-*.spec.ts`). See `e2e/README.md`.
+(`e2e/tests/topic{1,2,3}-*.spec.ts`); the demo-director transition arc of §0b is verified by
+`e2e/tests/scenario-transitions.spec.ts`. See `e2e/README.md`.
