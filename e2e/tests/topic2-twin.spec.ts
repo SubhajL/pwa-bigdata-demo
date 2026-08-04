@@ -5,13 +5,14 @@ import { apiJson } from "../lib/api";
 // Topic ๒ — Real-time Digital Twin (35 pts).
 //
 // NOTE (items 2.2/2.4): the socket-driven status update and the pressure-drop impact panel are
-// unit/integration-verified in web/src/features/twin/useTwinSocket.test.tsx and api/tests/test_twin_*.py.
-// The PR-7 demo-data tuning (scripts/backfill_history.py::DEMO_WEAR_OVERRIDE) backfills P-2 to
-// health≈32 → `critical` (still pre-failure), so at a true cold start the twin colours it red;
-// pressure_drop drives pressure below the 2.0 low band (simulator/tests/test_pressure_drop.py). These
-// specs assert the wired, live surfaces (real data, not the static mockup) and tolerate `warning` as
-// well as `critical`: the live window averages readings per clock-hour, so a stack that has been
-// running a while washes P-2's health from red back up toward `warning`/`normal` (docs/demo-runbook.md).
+// unit/integration-verified in web/src/features/twin/useTwinSocket.test.tsx and api/tests/test_twin_*.py,
+// and their timed live transitions are browser-observed in scenario-transitions.spec.ts (the PR #30
+// demo director). These specs assert the wired, live surfaces (real data, not the static mockup) and
+// tolerate `warning` as well as `critical`: in suite order scenario-transitions runs first and
+// deliberately ends with P-2 degraded (its header explains why), and the live window averages
+// readings per clock-hour, so P-2's health can wash from `critical` toward `warning` while these run.
+// (PR-7 tuning: scripts/backfill_history.py::DEMO_WEAR_OVERRIDE scores P-2 health≈32 pre-failure;
+// pressure_drop drives pressure below the 2.0 low band — simulator/tests/test_pressure_drop.py.)
 
 interface Device { asset_id: string; status: string; kind: string }
 
@@ -50,8 +51,8 @@ test("2.2 — device status on the twin is LIVE data, agreeing with the API (not
 
 test("2.3 — a non-nominal pump shows its shape-coded status and a SEC tooltip from real data", async ({ page }) => {
   await page.goto("/operations");
-  // P-2 is non-nominal (red at cold start; `warning` once the live window warms), rendered as a
-  // distinct SHAPE, never colour alone.
+  // P-2 is non-nominal (left degraded by scenario-transitions; washes critical→warning as the
+  // live window warms), rendered as a distinct SHAPE, never colour alone.
   const symbol = page.locator('[data-asset="P-2"]');
   await expect(symbol).toHaveAttribute("data-status", /warning|critical/);
   expect(await symbol.locator("[data-symbol]").count()).toBeGreaterThan(0);

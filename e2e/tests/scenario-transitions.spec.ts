@@ -96,7 +96,7 @@ test("P1 — pressure_drop transitions the SAME loaded twin: band stage, pipes, 
   await expect.poll(() => p2Dom(page), { timeout: 10_000 }).not.toBe("normal");
   expect(["warning", "critical"]).toContain(await p2Dom(page));
 
-  // The drop drives the impact join: outgoing pipes highlight, real customers render.
+  // The drop drives the impact join: outgoing pipes highlight, the seeded (SIMULATED) customers render.
   // (Count, not toBeVisible: a horizontal SVG <line> has a zero-height bounding box,
   // which Playwright's visibility rule calls hidden even while it renders red on screen.)
   await expect

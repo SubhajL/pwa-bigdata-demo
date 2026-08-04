@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# One-command cold-start + readiness gate for the scored demo (PR-17 / slice S-D).
+# One-command stack-readiness gate for the scored demo (PR-17 / slice S-D).
 # Brings the whole stack up (building if needed), waits for the API to be healthy, then checks
 # every judge-facing surface is live and that at least one device has actually been scored.
 # Exits non-zero (and says what failed) if the stack is not demo-ready.
+# NOTE: volumes are preserved — this warms the existing stack, it is NOT a fresh-volume start.
+# For a true fresh-volume start (re-seed + re-backfill) run `make demo-down` first.
 #
 # Usage: scripts/demo-preflight.sh
 set -euo pipefail
@@ -30,7 +32,7 @@ for i in $(seq 1 60); do
 done
 
 # The web container's Vite dev server can take several seconds past API-healthy to answer,
-# so a one-shot probe in the surface list below false-fails on a cold `up`. Wait for it the
+# so a one-shot probe in the surface list below false-fails on a fresh `up`. Wait for it the
 # same way we wait for the API. On genuine timeout we don't exit here: the frontend is one of
 # many surfaces, so we fall through and let the aggregated `check` below own the ✗ verdict.
 printf '→ waiting for frontend %s ' "$WEB"

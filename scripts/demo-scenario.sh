@@ -2,7 +2,8 @@
 # Switch the telemetry simulator's fault mode for a scored-demo scenario (PR-17 / slice S-D).
 #
 # The simulator reads FAULT_MODE at container start (infra/docker-compose.yml), so a scenario
-# is a one-command recreate of just the `simulator` service — no scenario API, no code change.
+# is a one-command recreate of just the `simulator` service. (`normal` additionally POSTs a
+# best-effort demo-director reset — see the bottom of this script.)
 #   normal        — healthy telemetry (reset)
 #   anomaly       — pump anomaly (item 2.3: symbol turns critical, SEC tooltip)
 #   pressure_drop — pressure below band on a pump (item 2.4: pipe highlight + affected customers)

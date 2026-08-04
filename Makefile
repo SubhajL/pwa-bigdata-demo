@@ -13,7 +13,7 @@ demo-up: ## bring the full stack up (build if needed)
 demo-down: ## stop the stack and REMOVE volumes (a true cold start next time)
 	$(COMPOSE) down -v
 
-demo-preflight: ## cold-start + readiness gate (every scored surface live)
+demo-preflight: ## stack-readiness gate (up + wait healthy + every scored surface live; volumes preserved)
 	scripts/demo-preflight.sh
 
 demo-reconnect: ## item 1.2 — restart the broker and time the reconnect (fails if > 30s)
