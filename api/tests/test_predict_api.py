@@ -11,8 +11,11 @@ tests about the response a judge sees rather than about a lifespan.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import pathlib
+import re
+import shutil
 from datetime import UTC, datetime
 
 import pytest
@@ -20,7 +23,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
-from app.model import get_bundle, read_model_card, resolve_model_path
+from app.model import get_loaded, read_model_card, resolve_model_path
 from app.routes import predict as predict_routes
 from app.scoring import ScoringDeps, score_all
 
@@ -33,17 +36,20 @@ def _probe(pool: ConnectionPool | None) -> FastAPI:
     probe = FastAPI()
     probe.include_router(predict_routes.router)
     probe.state.pool = pool
-    probe.state.bundle = get_bundle("")
-    # /api/model reads the card from the sibling of the RESOLVED artifact, exactly as the
-    # real lifespan stashes it — wiring it here keeps card↔model parity in the test too.
-    probe.state.model_path = resolve_model_path("")
+    loaded = get_loaded("")
+    # Bundle, path, and digest all come from the ONE load event, exactly as the lifespan
+    # stashes them — re-resolving here would repeat the double-resolution defect the
+    # lifespan was cured of (review round 3).
+    probe.state.bundle = None if loaded is None else loaded.bundle
+    probe.state.model_path = None if loaded is None else loaded.path
+    probe.state.artifact_sha256 = None if loaded is None else loaded.artifact_sha256
     return probe
 
 
 def _score(pool: ConnectionPool) -> None:
-    bundle = get_bundle("")
-    assert bundle is not None
-    score_all(ScoringDeps(pool=pool, bundle=bundle), now=datetime.now(tz=UTC))
+    loaded = get_loaded("")
+    assert loaded is not None
+    score_all(ScoringDeps(pool=pool, bundle=loaded.bundle), now=datetime.now(tz=UTC))
 
 
 # ── registration and Swagger (no database required) ───────────────────────────────────
@@ -318,6 +324,149 @@ def test_model_endpoint_is_registered_and_documented() -> None:
     assert body_ref.rsplit("/", 1)[-1] == "ModelCardResponse"
 
 
+def test_loaded_digest_is_of_the_snapshot_bytes_even_after_replacement(
+    model_artifact: object, tmp_path: pathlib.Path
+) -> None:
+    """The served digest describes the bytes the process LOADED, not whatever the path
+    holds later (g-check HIGH, 2026-08-05): hash and bundle come from ONE `read_bytes`
+    snapshot, so replacing the file afterwards must change neither."""
+    artifact = resolve_model_path("")
+    assert artifact is not None, "the model_artifact fixture guarantees a resolvable artifact"
+    original = artifact.read_bytes()
+    blob = tmp_path / "model.pkl"
+    blob.write_bytes(original)
+
+    loaded = get_loaded(str(blob))
+    assert loaded is not None
+    assert loaded.artifact_sha256 == hashlib.sha256(original).hexdigest()
+
+    # The path travels WITH the load event — no second resolution anywhere (workflow LOW:
+    # a re-resolved path could pair this bundle with a card directory it never came from).
+    assert loaded.path == blob
+
+    # Replace the artifact on disk AFTER the load — retrain-in-place, volume swap.
+    blob.write_bytes(b"never-loaded-replacement-bytes")
+    reloaded = get_loaded(str(blob))
+    assert reloaded is not None
+    assert reloaded.bundle is loaded.bundle, "the cached loaded bundle must keep serving"
+    assert reloaded.artifact_sha256 == loaded.artifact_sha256, (
+        "digest drifted to the replaced file — it no longer describes the loaded bytes"
+    )
+
+    # And the ROUTE serves the loaded digest, not a rehash of the replaced file: a probe
+    # wired from THIS load event (as the lifespan wires app.state) must keep answering
+    # with the snapshot's hash (g-check round-2: the endpoint test alone used a stable
+    # file, so a future route-level rehash could have passed both tests independently).
+    shutil.copy(artifact.parent / "model_card.json", tmp_path / "model_card.json")
+    probe = FastAPI()
+    probe.include_router(predict_routes.router)
+    probe.state.pool = None
+    probe.state.bundle = loaded.bundle
+    probe.state.model_path = loaded.path
+    probe.state.artifact_sha256 = loaded.artifact_sha256
+
+    with TestClient(probe) as client:
+        resp = client.get(MODEL_PATH)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["artifact_sha256"] == loaded.artifact_sha256
+
+
+def test_fixture_rebuild_leaves_loader_and_card_bound(model_artifact: object) -> None:
+    """A fixture-owned rebuild must not leave an earlier-primed loader cache describing the
+    pre-rebuild bytes (g-check round-4 MEDIUM, reproduced by probe): prime the cache, break
+    the pair on disk, run the fixture's own code path, and the NEXT load must be a fresh
+    object whose digest matches the rebuilt card."""
+    from tests.conftest import ML_ROOT, _ensure_bound_artifact
+
+    artifact = ML_ROOT / "artifacts" / "model.pkl"
+    primed = get_loaded("")
+    assert primed is not None
+
+    with artifact.open("ab") as fh:  # break the card↔pkl bind; joblib still loads this
+        fh.write(b"X")
+    # Must detect the split pair, rebuild, and drop the loader cache. Deterministic
+    # training restores the canonical pair, so no later test inherits a broken ml/artifacts.
+    _ensure_bound_artifact()
+
+    card = json.loads((ML_ROOT / "artifacts" / "model_card.json").read_text(encoding="utf-8"))
+    reloaded = get_loaded("")
+    assert reloaded is not None
+    assert reloaded is not primed, "loader cache survived the fixture rebuild"
+    assert reloaded.artifact_sha256 == card["artifact_sha256"], (
+        "post-rebuild load does not match the rebuilt card — the split pair is back"
+    )
+
+
+def test_lifespan_resolves_the_model_path_exactly_once(
+    model_artifact: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lifespan must take bundle, path, and digest from ONE load event (g-check round-3
+    MEDIUM: the round-2 fix was pinned by comment only). A reverted `main.py` that calls
+    `resolve_model_path` a second time — re-opening the artifact-A/card-B splice — fails
+    the call-count assertion below."""
+    import app.main as main_mod
+    import app.model as model_mod
+
+    calls: list[str] = []
+    real = model_mod.resolve_model_path
+
+    def counting(configured: str = "") -> pathlib.Path | None:
+        calls.append(configured)
+        return real(configured)
+
+    monkeypatch.setattr(model_mod, "resolve_model_path", counting)
+    if hasattr(main_mod, "resolve_model_path"):  # a reverted import re-exposes the name
+        monkeypatch.setattr(main_mod, "resolve_model_path", counting)
+
+    with TestClient(main_mod.app):
+        pass
+
+    assert len(calls) == 1, (
+        f"lifespan resolved the model path {len(calls)}× — bundle/path/sha must come from "
+        "one load event, or a card directory can pair with an artifact it never came from"
+    )
+    # And the stashed trio is self-consistent with that single event.
+    state = main_mod.app.state
+    assert state.bundle is not None
+    assert state.model_path is not None
+    assert state.artifact_sha256 == hashlib.sha256(state.model_path.read_bytes()).hexdigest()
+
+
+def test_model_endpoint_attaches_the_loaded_artifact_hash(model_artifact: object) -> None:
+    """Item 3.1 provenance: `/api/model` carries the SHA-256 of the artifact it actually
+    loaded, so the UI, Swagger, and preflight can display ONE comparable hash — the field
+    is recomputed here from the resolved file, not compared to itself."""
+    artifact = resolve_model_path("")
+    assert artifact is not None, "the model_artifact fixture guarantees a resolvable artifact"
+    expected = hashlib.sha256(artifact.read_bytes()).hexdigest()
+
+    with TestClient(_probe(None)) as client:
+        resp = client.get(MODEL_PATH)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert re.fullmatch(r"[0-9a-f]{64}", body["artifact_sha256"]), (
+        "artifact_sha256 must be a full lowercase SHA-256 hexdigest"
+    )
+    assert body["artifact_sha256"] == expected
+    # The training-data hash and the artifact hash are DIFFERENT facts; serving one as the
+    # other would be provenance theatre.
+    assert body["artifact_sha256"] != body["data_sha256"]
+
+
+def test_model_card_schema_requires_the_artifact_hash() -> None:
+    """The OpenAPI document is the contract TypeScript mirrors (roadmap wiring rule for
+    PR-D): `artifact_sha256` must be REQUIRED, not an optional afterthought."""
+    from app.main import app
+
+    with TestClient(app) as client:
+        spec = client.get("/openapi.json").json()
+
+    schema = spec["components"]["schemas"]["ModelCardResponse"]
+    assert "artifact_sha256" in schema["required"]
+
+
 def test_model_endpoint_serves_the_card_and_two_separating_datasets(
     model_artifact: object,
 ) -> None:
@@ -392,13 +541,41 @@ def test_model_endpoint_503_when_the_card_does_not_match_the_loaded_model(
     probe.state.model_path = tmp_path / "model.pkl"  # sibling card is the mismatched one
 
     with TestClient(probe) as client:
-        assert client.get(MODEL_PATH).status_code == 503
+        resp = client.get(MODEL_PATH)
+
+    assert resp.status_code == 503
+    # Pin the NAMED guard: a 503 for any other reason (e.g. an unreadable card) would let
+    # the parity check be deleted while this test kept passing (g-check MEDIUM).
+    assert resp.json()["detail"] == "model card does not match loaded model"
+
+
+def test_model_endpoint_503_when_a_same_version_card_describes_another_artifact(
+    model_artifact: object, tmp_path: pathlib.Path
+) -> None:
+    """Card↔artifact binding (workflow MEDIUM / g-check HIGH, round 2, reproduced): the
+    `model_version` guard is VACUOUS across training runs — the version is a hard constant —
+    so a complete, same-version card from a different run must be rejected on its
+    `artifact_sha256` instead. The card here is the REAL card with ONLY that field flipped,
+    so this guard is the sole reason for the 503."""
+    artifact = resolve_model_path("")
+    assert artifact is not None, "the model_artifact fixture guarantees a resolvable artifact"
+    card = read_model_card(artifact.parent)
+    card["artifact_sha256"] = "f" * 64  # a different training run's artifact
+    (tmp_path / "model_card.json").write_text(json.dumps(card), encoding="utf-8")
+    probe = _probe(None)
+    probe.state.model_path = tmp_path / "model.pkl"
+
+    with TestClient(probe) as client:
+        resp = client.get(MODEL_PATH)
+
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == "model card does not match loaded artifact"
 
 
 @pytest.mark.parametrize(
-    "bad_card",
+    ("bad_card", "expected_detail"),
     [
-        pytest.param("not-a-json-object", id="json-scalar"),
+        pytest.param("not-a-json-object", "model card unavailable", id="json-scalar"),
         pytest.param(
             {
                 "model_version": "pwa-health-pttf-v1",
@@ -406,6 +583,7 @@ def test_model_endpoint_503_when_the_card_does_not_match_the_loaded_model(
                 "metrics": {},
                 "data_sha256": "",
             },
+            "model card incomplete",
             id="empty-estimators",
         ),
         pytest.param(
@@ -416,22 +594,33 @@ def test_model_endpoint_503_when_the_card_does_not_match_the_loaded_model(
                 "metrics": {},
                 "data_sha256": "",
             },
+            "model card malformed",
             id="pipelines-not-a-mapping",
         ),
     ],
 )
 def test_model_endpoint_503_on_a_structurally_broken_card(
-    model_artifact: object, tmp_path: pathlib.Path, bad_card: object
+    model_artifact: object, tmp_path: pathlib.Path, bad_card: object, expected_detail: str
 ) -> None:
     """Structural corruption degrades to 503, never 500 or an empty 200: a non-object card
     (would AttributeError on `.get`), and a right-version card with no estimators (would serve
-    an empty 200) both fail closed (Codex MEDIUM 503-isolation)."""
+    an empty 200) both fail closed (Codex MEDIUM 503-isolation). Each case pins ITS detail so
+    the 503 provably comes from the named guard, not an earlier short-circuit (g-check
+    MEDIUM). Dict cards get the REAL loaded digest injected: provenance is guarded FIRST,
+    and these cases are about the structural guards behind it."""
+    if isinstance(bad_card, dict):
+        loaded = get_loaded("")
+        assert loaded is not None
+        bad_card = {**bad_card, "artifact_sha256": loaded.artifact_sha256}
     (tmp_path / "model_card.json").write_text(json.dumps(bad_card), encoding="utf-8")
     probe = _probe(None)
     probe.state.model_path = tmp_path / "model.pkl"
 
     with TestClient(probe) as client:
-        assert client.get(MODEL_PATH).status_code == 503
+        resp = client.get(MODEL_PATH)
+
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == expected_detail
 
 
 def test_model_endpoint_503_on_a_structurally_malformed_card(
@@ -444,10 +633,15 @@ def test_model_endpoint_503_on_a_structurally_malformed_card(
     missing `estimator_class` and raises a pydantic `ValidationError`. The handler must catch
     it and report 503 — not surface a 500. (Distinct from the guard-short-circuit cases above.)
     """
+    loaded = get_loaded("")
+    assert loaded is not None
     (tmp_path / "model_card.json").write_text(
         json.dumps(
             {
                 "model_version": "pwa-health-pttf-v1",  # matches the bundle → passes parity
+                # …and the REAL loaded digest → passes the artifact-binding guard, so control
+                # provably reaches the pydantic construction this test is about.
+                "artifact_sha256": loaded.artifact_sha256,
                 # both estimators present (passes completeness) but each missing estimator_class
                 "pipelines": {"health": {"target": "x"}, "pttf": {"target": "y"}},
                 "metrics": {
@@ -463,7 +657,10 @@ def test_model_endpoint_503_on_a_structurally_malformed_card(
     probe.state.model_path = tmp_path / "model.pkl"
 
     with TestClient(probe) as client:
-        assert client.get(MODEL_PATH).status_code == 503
+        resp = client.get(MODEL_PATH)
+
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == "model card malformed"  # the pydantic guard, by name
 
 
 def test_model_endpoint_says_so_when_there_is_no_model() -> None:

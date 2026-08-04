@@ -26,7 +26,7 @@ from .config import Settings, get_settings
 from .curated import load_curated
 from .db import get_pool
 from .ingest import PipelineStatus, RawMessage
-from .model import get_bundle, resolve_model_path
+from .model import get_loaded
 from .routes import curated as curated_routes
 from .routes import demo as demo_routes
 from .routes import dlq as dlq_routes
@@ -115,6 +115,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.twin_hub = None
     app.state.bundle = None
     app.state.model_path = None
+    app.state.artifact_sha256 = None
     app.state.scoring_deps = None
     app.state.curated = None
 
@@ -141,12 +142,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Loaded once per process: unpickling a scikit-learn pipeline is not free, and both the
     # scoring cycle and the on-demand routes need it. None here disables the predictive
     # endpoints without touching the pipeline ones — topic ๑ must not depend on topic ๓.
-    bundle = get_bundle(settings.model_path)
+    loaded = get_loaded(settings.model_path)
+    bundle = None if loaded is None else loaded.bundle
     app.state.bundle = bundle
-    # The path the bundle was actually loaded from, so `/api/model` reads the card that
-    # shipped WITH this artifact (scored item 3.1) rather than re-resolving one that a custom
-    # MODEL_PATH could pair with the wrong model. None when no artifact loaded.
-    app.state.model_path = resolve_model_path(settings.model_path) if bundle is not None else None
+    # Path and digest come from the SAME load event as the bundle — never re-resolved, so
+    # `/api/model` reads the card that shipped WITH the loaded artifact and can never serve
+    # a hash of bytes the process didn't load (item 3.1 provenance; g-check HIGH rounds 1–2:
+    # a second `resolve_model_path` here could pair this bundle with a different path).
+    app.state.model_path = None if loaded is None else loaded.path
+    app.state.artifact_sha256 = None if loaded is None else loaded.artifact_sha256
 
     consumer: asyncio.Task[None] | None = None
     if settings.mqtt_enabled and pool is not None:

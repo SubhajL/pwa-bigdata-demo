@@ -15,13 +15,86 @@ test("3.1 — the trained model, its algorithm and parameters are on screen (rea
   expect(model.metrics.health.model_mae).toBeLessThan(model.metrics.health.baseline_mae);
 });
 
-test("3.2 — Health & PTTF differ across two datasets (item 3.2)", async ({ page }) => {
-  const model = await apiJson<{ datasets: { name: string; health_score: number }[] }>("/api/model");
-  const byName = Object.fromEntries(model.datasets.map((d) => [d.name, d.health_score]));
-  expect(byName.healthy - byName.degraded).toBeGreaterThanOrEqual(15); // materially different
+test("3.1b — the artifact hash on screen IS the hash the API serves (provenance, no drift)", async ({ page }) => {
+  // PR-D: one hash across the running image, the API, the card on screen, and preflight.
+  const model = await apiJson<{ artifact_sha256: string; data_sha256: string }>("/api/model");
+  expect(model.artifact_sha256).toMatch(/^[0-9a-f]{64}$/);
+  expect(model.artifact_sha256).not.toBe(model.data_sha256); // artifact ≠ training-data hash
   await page.goto("/predictive");
-  await expect(page.getByTestId("dataset-healthy")).toBeVisible();
-  await expect(page.getByTestId("dataset-degraded")).toBeVisible();
+  // String-for-string equality with the API — the DOM exposes the full untruncated hash.
+  const sha = page.getByTestId("model-artifact-sha");
+  await expect(sha).toHaveAttribute("data-sha256", model.artifact_sha256);
+  // …and the judge-VISIBLE text is a recognizable prefix of that same hash.
+  await expect(sha).toContainText(model.artifact_sha256.slice(0, 12));
+});
+
+test("3.2 — Health & PTTF differ across two datasets, in the DOM the judge reads (item 3.2)", async ({ page }) => {
+  interface Tile { name: string; health_score: number; pttf_hours: number; pttf_out_of_range: boolean }
+  const model = await apiJson<{ datasets: Tile[] }>("/api/model");
+  const byName = Object.fromEntries(model.datasets.map((d) => [d.name, d]));
+  await page.goto("/predictive");
+
+  // The component's own formatting rules (web/src/lib/format.ts), replicated so the
+  // VISIBLE numbers can be predicted from the API payload: formatInt rounds
+  // half-away-from-zero; PTTF renders as days with exactly one fraction digit.
+  const visibleInt = (v: number): string => {
+    const rounded = (v < 0 ? -1 : 1) * Math.floor(Math.abs(v) + 0.5);
+    return new Intl.NumberFormat("th-TH", { style: "decimal", useGrouping: true }).format(rounded);
+  };
+  const visibleDays = (hours: number): string =>
+    new Intl.NumberFormat("th-TH", {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    }).format(hours / 24);
+
+  // Literal DOM↔API correspondence: the tiles expose the exact served values, and the
+  // numbers a judge actually READS are asserted against the same payload — so neither
+  // metadata nor the visible rendering can drift from what /api/model said.
+  for (const name of ["healthy", "degraded"] as const) {
+    const tile = page.getByTestId(`dataset-${name}`);
+    await expect(tile).toBeVisible();
+    await expect(tile).toHaveAttribute("data-health-score", String(byName[name].health_score));
+    await expect(tile).toHaveAttribute("data-pttf-hours", String(byName[name].pttf_hours));
+    await expect(tile).toHaveAttribute(
+      "data-pttf-lower-bound",
+      String(byName[name].pttf_out_of_range),
+    );
+    // The judge-visible numbers, not just tile metadata (g-check MEDIUM). EXACT text on
+    // the bare-number hooks: containment accepted "122.0" for "22.0" (review round 3).
+    await expect(tile.getByTestId("dataset-health-visible")).toHaveText(
+      visibleInt(byName[name].health_score),
+    );
+    await expect(tile.getByTestId("dataset-pttf-days")).toHaveText(
+      visibleDays(byName[name].pttf_hours),
+    );
+    // A censored PTTF must be VISIBLY a lower bound (≥), never silently exact — and an
+    // exact PTTF must not wear the marker.
+    const marker = tile.locator('[aria-hidden="true"]', { hasText: "≥" });
+    await (byName[name].pttf_out_of_range
+      ? expect(marker).toBeVisible()
+      : expect(marker).toHaveCount(0));
+  }
+
+  // The separation and direction claims are made from the RENDERED values themselves.
+  const domHealth = async (name: string): Promise<number> =>
+    Number(await page.getByTestId(`dataset-${name}`).getAttribute("data-health-score"));
+  const domPttf = async (name: string): Promise<number> =>
+    Number(await page.getByTestId(`dataset-${name}`).getAttribute("data-pttf-hours"));
+  expect((await domHealth("healthy")) - (await domHealth("degraded"))).toBeGreaterThanOrEqual(15);
+  expect(await domPttf("healthy")).toBeGreaterThan(await domPttf("degraded")); // PTTF direction
+
+  // …and the VISIBLE PTTF numbers must themselves differ in that direction: two hour
+  // values that collapse to the same one-decimal day text would show a judge NO variation,
+  // however correct the raw attributes are (g-check round-2 LOW). Read from the exact
+  // bare-number hook so a marker or prefix can never leak into the parse.
+  const visibleDayNumber = async (name: string): Promise<number> => {
+    const text = await page
+      .getByTestId(`dataset-${name}`)
+      .getByTestId("dataset-pttf-days")
+      .innerText();
+    return Number(text.replace(/,/g, ""));
+  };
+  expect(await visibleDayNumber("healthy")).toBeGreaterThan(await visibleDayNumber("degraded"));
 });
 
 test("3.3 — a device's model health status is reflected on the twin (model→twin binding)", async () => {

@@ -48,14 +48,26 @@ function DatasetTile({ score }: { readonly score: DatasetScore | undefined }): J
   return (
     <div
       data-testid={`dataset-${score.name}`}
+      // The exact served values, untouched by display rounding: the E2E compares these
+      // attributes to /api/model string-for-string (PR-D DOM↔API correspondence).
+      data-health-score={score.health_score}
+      data-pttf-hours={score.pttf_hours}
+      data-pttf-lower-bound={String(score.pttf_out_of_range)}
       className="flex items-center justify-between rounded-control border border-outline-variant p-4"
     >
       <div className="flex flex-col gap-1">
         <span className="text-label text-on-surface-variant">{TILE_LABEL[score.name] ?? score.name}</span>
         <div className="flex items-baseline gap-6">
-          <Metric label="Health" value={<Num kind="int" value={score.health_score} />} />
+          {/* The testids mark the VISIBLE numbers: the E2E asserts what a judge reads,
+              not only the data-* correspondence attributes on the tile (g-check MEDIUM). */}
+          <Metric
+            label="Health"
+            testId="dataset-health-visible"
+            value={<Num kind="int" value={score.health_score} />}
+          />
           <Metric
             label="PTTF (วัน)"
+            testId="dataset-pttf-visible"
             value={
               <span className="tabular">
                 {score.pttf_out_of_range && (
@@ -64,7 +76,12 @@ function DatasetTile({ score }: { readonly score: DatasetScore | undefined }): J
                     <span aria-hidden="true">≥ </span>
                   </>
                 )}
-                <Num kind="decimal" digits={1} value={days} />
+                {/* The bare number gets its own hook so tests can assert it EXACTLY —
+                    substring matching against the marker-bearing parent accepts wrong
+                    numbers like "122.0" for "22.0" (review round 3, both tiers). */}
+                <span data-testid="dataset-pttf-days">
+                  <Num kind="decimal" digits={1} value={days} />
+                </span>
               </span>
             }
           />
@@ -75,11 +92,21 @@ function DatasetTile({ score }: { readonly score: DatasetScore | undefined }): J
   );
 }
 
-function Metric({ label, value }: { readonly label: string; readonly value: ReactNode }): JSX.Element {
+function Metric({
+  label,
+  value,
+  testId,
+}: {
+  readonly label: string;
+  readonly value: ReactNode;
+  readonly testId?: string;
+}): JSX.Element {
   return (
     <div className="flex flex-col">
       <span className="text-label text-on-surface-variant">{label}</span>
-      <span className="text-xl font-semibold text-on-surface">{value}</span>
+      <span data-testid={testId} className="text-xl font-semibold text-on-surface">
+        {value}
+      </span>
     </div>
   );
 }

@@ -19,7 +19,7 @@ import sys
 
 import pytest
 
-from app.model import CONTAINER_ARTIFACT, REPO_ARTIFACT, get_bundle, resolve_model_path
+from app.model import CONTAINER_ARTIFACT, REPO_ARTIFACT, get_loaded, resolve_model_path
 
 API_DIR = pathlib.Path(__file__).resolve().parents[1]
 REPO_ROOT = API_DIR.parent
@@ -59,10 +59,11 @@ def test_pwa_ml_resolves_from_the_api_package_alone() -> None:
 
 
 def test_the_shipped_artifact_loads_through_the_production_path(model_artifact: object) -> None:
-    """`get_bundle` is what the app calls; test it, not a hand-rolled joblib.load."""
-    bundle = get_bundle("")
+    """`get_loaded` is what the app calls; test it, not a hand-rolled joblib.load."""
+    loaded = get_loaded("")
 
-    assert bundle is not None, "the demo artifact must be loadable"
+    assert loaded is not None, "the demo artifact must be loadable"
+    bundle = loaded.bundle
     assert set(bundle.pipelines) == {"health", "pttf"}
     assert bundle.model_version
     assert len(bundle.feature_names) == 15
@@ -75,7 +76,7 @@ def test_an_explicitly_configured_path_is_never_silently_overridden() -> None:
     named while the demo serves another one.
     """
     assert resolve_model_path("/nonexistent/model.pkl") is None
-    assert get_bundle("/nonexistent/model.pkl") is None
+    assert get_loaded("/nonexistent/model.pkl") is None
 
 
 def test_scripts_import_pwa_ml_in_the_CONTAINER_layout(tmp_path: pathlib.Path) -> None:

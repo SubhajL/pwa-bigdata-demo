@@ -83,6 +83,35 @@ else
   FAILED=1
 fi
 
+# Item 3.1 provenance: the artifact hash the API serves must BE the hash of the model file
+# inside the running image — one hash across API, UI card, and this gate. Read-only and
+# bounded like the catalog probe. A curl/exec FAILURE (non-zero status) clears the value, and
+# anything that is not a full 64-hex digest is treated the same way — only two REAL,
+# validated digests may claim a mismatch. The container path honors the same MODEL_PATH
+# override the API's resolver does, so an honest custom artifact never reads as a mismatch.
+api_sha=$("${CURL[@]}" "$API/api/model" 2>/dev/null \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['artifact_sha256'])" 2>/dev/null) \
+  || api_sha=""
+img_sha=$("${COMPOSE[@]}" exec -T api timeout 8 python3 -c \
+  "import hashlib,os; p=(os.environ.get('MODEL_PATH') or '').strip() or '/srv/artifacts/model.pkl'; print(hashlib.sha256(open(p,'rb').read()).hexdigest())" \
+  2>/dev/null) || img_sha=""
+# Whole-string match, not per-line grep: a noisy producer that prints a warning line plus
+# a digest line must read as a probe failure, never as a verdict-bearing digest.
+[[ "$api_sha" =~ ^[0-9a-f]{64}$ ]] || api_sha=""
+[[ "$img_sha" =~ ^[0-9a-f]{64}$ ]] || img_sha=""
+if [ -z "$api_sha" ] || [ -z "$img_sha" ]; then
+  printf '  ✗ %-34s (hash probe failed — API/exec error or malformed digest, not a mismatch verdict)\n' \
+    "topic ๓ · artifact provenance"
+  FAILED=1
+elif [ "$api_sha" = "$img_sha" ]; then
+  printf '  ✓ %-34s artifact_sha256 %.12s… matches the running image\n' \
+    "topic ๓ · artifact provenance" "$api_sha"
+else
+  printf '  ✗ %-34s (served artifact_sha256 %.12s… != image file %.12s…)\n' \
+    "topic ๓ · artifact provenance" "$api_sha" "$img_sha"
+  FAILED=1
+fi
+
 # Deeper readiness: the model must have produced at least one score (else topic ๓ is blank).
 scored=$("${CURL[@]}" "$API/api/worklist?limit=50" 2>/dev/null \
   | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)

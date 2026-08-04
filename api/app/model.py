@@ -13,16 +13,17 @@ predictive half is unavailable, exactly as an unreachable database leaves `/heal
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from collections.abc import Sequence
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from pwa_ml.datasets import CORPUS_SEED, WINDOW_HOURS, build_corpus
 from pwa_ml.lifecycle import LifecycleRow, LifecycleRun
-from pwa_ml.predict import Bundle, load_bundle, score_window
+from pwa_ml.predict import Bundle, load_bundle_bytes, score_window
 
 from .models import DatasetScore
 
@@ -57,19 +58,45 @@ def resolve_model_path(configured: str = "") -> Path | None:
     return None
 
 
+class LoadedArtifact(NamedTuple):
+    """A deserialized model together with the digest and path of the bytes it came from.
+
+    The three travel as ONE value on purpose (g-check HIGH, 2026-08-05, rounds 1–2): a hash
+    computed by re-reading the path later can describe bytes the process never loaded, and a
+    path re-resolved later can point the card lookup at a directory the bundle never came
+    from. Both are precisely the provenance lies the `artifact_sha256` field exists to rule
+    out (scored item 3.1).
+    """
+
+    bundle: Bundle
+    #: SHA-256 hexdigest of the snapshot the bundle was unpickled from — the plain file
+    #: digest, reproducible outside this process with `sha256sum`.
+    artifact_sha256: str
+    #: The file the snapshot was read from — the SINGLE resolution; never re-derive it.
+    path: Path
+
+
 @lru_cache(maxsize=4)
-def _load_cached(path: str) -> Bundle:
-    """Deserialize once per path. Unpickling a scikit-learn pipeline is not free, and
-    `score_all` runs on a timer over the whole roster."""
-    return load_bundle(Path(path))
+def _load_cached(path: str) -> LoadedArtifact:
+    """Read the file ONCE, then hash and deserialize that same snapshot. Cached per path:
+    unpickling a scikit-learn pipeline is not free, `score_all` runs on a timer over the
+    whole roster, and the served hash must keep describing the bytes this process loaded
+    even if the file is later replaced on disk."""
+    source = Path(path)
+    data = source.read_bytes()
+    return LoadedArtifact(
+        bundle=load_bundle_bytes(data),
+        artifact_sha256=hashlib.sha256(data).hexdigest(),
+        path=source,
+    )
 
 
-def get_bundle(configured: str = "") -> Bundle | None:
-    """The loaded model, or None when no artifact is available.
+def get_loaded(configured: str = "") -> LoadedArtifact | None:
+    """The loaded model and its provenance digest, or None when no artifact is available.
 
     Returns:
-        The deserialized `Bundle`, cached across calls, or None if the artifact is absent
-        or unreadable. Never raises — a corrupt artifact disables prediction rather than
+        The `LoadedArtifact`, cached across calls, or None if the artifact is absent or
+        unreadable. Never raises — a corrupt artifact disables prediction rather than
         preventing the API from starting.
     """
     path = resolve_model_path(configured)

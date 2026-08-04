@@ -17,10 +17,10 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pwa_ml.predict import CRITICAL_BELOW, WARNING_BELOW, score_window
+from pwa_ml.predict import CRITICAL_BELOW, WARNING_BELOW, Bundle, score_window
 
 from ..db import query_range
 from ..features import WINDOW_HOURS, build_window
@@ -254,7 +254,12 @@ def model_card(request: Request) -> ModelCardResponse:
     """
     bundle = getattr(request.app.state, "bundle", None)
     model_path = getattr(request.app.state, "model_path", None)
-    if bundle is None or model_path is None:
+    # The digest of the exact bytes `bundle` was unpickled from, stashed by the SAME load
+    # event (see `app.model.LoadedArtifact`). Never recomputed here: hashing the path at
+    # request time could describe a file replaced after load — the provenance lie this
+    # field exists to rule out.
+    loaded_sha256 = getattr(request.app.state, "artifact_sha256", None)
+    if bundle is None or model_path is None or loaded_sha256 is None:
         raise HTTPException(status_code=503, detail="model artifact not available")
 
     try:
@@ -265,12 +270,47 @@ def model_card(request: Request) -> ModelCardResponse:
         logger.exception("model card unreadable at %s", model_path)
         raise HTTPException(status_code=503, detail="model card unavailable") from None
 
+    return _validated_card_response(card, bundle, model_path, loaded_sha256)
+
+
+def _guard_card_provenance(
+    card: dict[str, Any], bundle: Bundle, model_path: Path, loaded_sha256: str
+) -> None:
+    """Refuse a card that does not describe the loaded artifact (item 3.1).
+
+    Raises:
+        HTTPException: 503 on a `model_version` mismatch, or when the card's
+            `artifact_sha256` differs from the digest of the bytes actually loaded —
+            `model_version` is a training-time CONSTANT, so it cannot tell two runs
+            apart; the digest the training run wrote into the card is what binds it
+            (g-check HIGH round 2, reproduced by the review workflow). An absent field
+            is an unbound card and gets the same refusal.
+    """
     if card.get("model_version") != bundle.model_version:
         logger.error(
             "model card version %r does not match loaded model %r",
             card.get("model_version"), bundle.model_version,
         )
         raise HTTPException(status_code=503, detail="model card does not match loaded model")
+    if card.get("artifact_sha256") != loaded_sha256:
+        logger.error(
+            "model card at %s records artifact %r, but the loaded artifact is %s",
+            model_path, card.get("artifact_sha256"), loaded_sha256,
+        )
+        raise HTTPException(status_code=503, detail="model card does not match loaded artifact")
+
+
+def _validated_card_response(
+    card: dict[str, Any], bundle: Bundle, model_path: Path, loaded_sha256: str
+) -> ModelCardResponse:
+    """Guard the card against the loaded model, then build the response (item 3.1).
+
+    Raises:
+        HTTPException: 503 on a provenance mismatch (see `_guard_card_provenance`),
+            missing estimators/metrics, or any structurally malformed field — a corrupt
+            card must 503, not 500.
+    """
+    _guard_card_provenance(card, bundle, model_path, loaded_sha256)
 
     try:
         # A card must describe BOTH estimators (item 3.1); an empty/partial pipelines would
@@ -287,6 +327,7 @@ def model_card(request: Request) -> ModelCardResponse:
             pipelines={k: EstimatorCard(**v) for k, v in card["pipelines"].items()},
             metrics={k: MetricPair(**v) for k, v in card["metrics"].items()},
             data_sha256=card["data_sha256"],
+            artifact_sha256=loaded_sha256,
             created_from=card.get("created_from", {}),
             censoring=card.get("censoring", {}),
             limitations=card.get("limitations", []),
