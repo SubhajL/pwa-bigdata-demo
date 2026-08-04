@@ -23,7 +23,7 @@ from pwa_ml.predict import CRITICAL_BELOW, WARNING_BELOW, load_bundle, score_win
 
 from app import demo
 from app.features import WINDOW_HOURS, build_window
-from app.models import Reading
+from app.models import Reading, Signal
 
 # ── solver ─────────────────────────────────────────────────────────────────────────────
 
@@ -73,14 +73,22 @@ def test_solver_folds_a_reserved_reading_into_the_bucket_mean() -> None:
 def test_solved_rows_leave_the_instant_buckets_mean_on_trajectory() -> None:
     now = datetime(2026, 8, 3, 12, 30, 0, tzinfo=UTC)
     signal, value = demo.instant_reading("pressure_drop")
-    rows = demo._solved_rows(
-        {}, target="P-2", wear=demo.WORN_WEAR, now=now, run_id="r", instant=(signal, value)
-    )
     targets = {(hb, s): v for hb, s, v in demo.trajectory("P-2", demo.WORN_WEAR)}
+    # The band excursion plus the fresh SEC pair (item 2.3) — one instant per signal,
+    # exactly what _replace_scenario reserves.
+    instants: dict[Signal, float] = {
+        signal: value,
+        "power_kw": round(targets[(0, "power_kw")], 4),
+        "flow_m3h": round(targets[(0, "flow_m3h")], 4),
+    }
+    rows = demo._solved_rows(
+        {}, target="P-2", wear=demo.WORN_WEAR, now=now, run_id="r", instants=instants
+    )
     bucket = now.replace(minute=0, second=0, microsecond=0)
-    in_bucket = [r.value for r in rows if r.signal == signal and r.ts >= bucket]
-    final_mean = (sum(in_bucket) + value) / (len(in_bucket) + 1)
-    assert final_mean == pytest.approx(targets[(0, signal)], abs=1e-3)
+    for inst_signal, inst_value in instants.items():
+        in_bucket = [r.value for r in rows if r.signal == inst_signal and r.ts >= bucket]
+        final_mean = (sum(in_bucket) + inst_value) / (len(in_bucket) + 1)
+        assert final_mean == pytest.approx(targets[(0, inst_signal)], abs=1e-3), inst_signal
 
 
 # ── trajectories through the shipped model (the item-3.3 oracle) ───────────────────────
