@@ -13,6 +13,11 @@ import { apiJson, dbDur, pollUntil, setFault, startBroker, stopBroker } from "..
 
 /** simulator/app/models.py::BAD_ASSET_ID — the unknown id FAULT_MODE=bad_asset publishes. */
 const BAD_ASSET_ID = "PWA-UNKNOWN-DEVICE-000";
+const REQUIRED_LATENCY_ENDPOINTS = [
+  "/api/telemetry/P-2/latest",
+  "/api/pipeline/status",
+  "/api/dlq?limit=1",
+] as const;
 
 async function openPipeline(page: Page): Promise<void> {
   await page.goto("/pipeline");
@@ -140,13 +145,16 @@ test("1.3 — ALL displayed endpoints complete five probes with zero failures an
   await pollUntil(
     async () => {
       const rows = await snapshotRows();
-      if (rows.length !== 3) return false;
+      if (rows.length !== REQUIRED_LATENCY_ENDPOINTS.length) return false;
       if (!rows.every((r) => r.count === "5" && r.failures === "0")) return false;
       clean = rows;
       return true;
     },
     { timeoutMs: 60_000, label: "a complete 3×5 zero-failure probe round on screen" },
   );
+  const renderedPaths = clean.map((row) => row.path);
+  expect(renderedPaths.every((path): path is string => path != null)).toBe(true);
+  expect([...renderedPaths].sort()).toEqual([...REQUIRED_LATENCY_ENDPOINTS].sort());
   for (const r of clean) {
     const mean = parseFloat(r.meanMs ?? "NaN");
     expect(Number.isFinite(mean), `numeric on-screen mean for ${r.path}`).toBe(true);

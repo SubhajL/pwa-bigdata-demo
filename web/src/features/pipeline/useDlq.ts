@@ -14,6 +14,8 @@ export interface UseDlqResult {
   readonly page: DlqResponse | null;
   readonly offset: number;
   readonly loading: boolean;
+  /** True for the initial request and every retained-data reload. */
+  readonly refreshing: boolean;
   readonly error: string | null;
   readonly stale: boolean;
   readonly setOffset: (offset: number) => void;
@@ -22,14 +24,44 @@ export interface UseDlqResult {
 
 export function useDlq(): UseDlqResult {
   const [offset, setOffset] = useState(0);
+  const [refreshing, setRefreshing] = useState(true);
+  const requestGen = useRef(0);
   // Stable per-offset so useOwnedAsync re-runs exactly when the page changes.
   const task = useCallback(
-    (signal: AbortSignal) => fetchDlq(PIPELINE_CONFIG.dlqPageSize, offset, signal),
+    async (signal: AbortSignal) => {
+      const myGen = ++requestGen.current;
+      try {
+        return await fetchDlq(PIPELINE_CONFIG.dlqPageSize, offset, signal);
+      } finally {
+        if (!signal.aborted && myGen === requestGen.current) setRefreshing(false);
+      }
+    },
     [offset],
   );
-  const { data, loading, error, stale, reload } = useOwnedAsync<DlqResponse>(task);
-  const clampedSetOffset = useCallback((next: number) => setOffset(Math.max(0, next)), []);
-  return { page: data, offset, loading, error, stale, setOffset: clampedSetOffset, reload };
+  const { data, loading, error, stale, reload: ownedReload } = useOwnedAsync<DlqResponse>(task);
+  const clampedSetOffset = useCallback(
+    (next: number) => {
+      const clamped = Math.max(0, next);
+      if (clamped === offset) return;
+      setRefreshing(true);
+      setOffset(clamped);
+    },
+    [offset],
+  );
+  const reload = useCallback(() => {
+    setRefreshing(true);
+    ownedReload();
+  }, [ownedReload]);
+  return {
+    page: data,
+    offset,
+    loading,
+    refreshing,
+    error,
+    stale,
+    setOffset: clampedSetOffset,
+    reload,
+  };
 }
 
 /**
@@ -43,7 +75,7 @@ export function useDlq(): UseDlqResult {
  * applied as ONE follow-up reload after the current request settles.
  */
 export function useDlqLiveRefresh(dlq: UseDlqResult, liveTotal: number | null): void {
-  const { offset, loading, reload } = dlq;
+  const { offset, refreshing, reload } = dlq;
   const prevTotal = useRef<number | null>(null);
   const pending = useRef(false);
   useEffect(() => {
@@ -51,13 +83,13 @@ export function useDlqLiveRefresh(dlq: UseDlqResult, liveTotal: number | null): 
     const prev = prevTotal.current;
     prevTotal.current = liveTotal;
     if (prev == null || prev === liveTotal || offset !== 0) return;
-    if (loading) pending.current = true;
+    if (refreshing) pending.current = true;
     else reload();
-  }, [liveTotal, offset, loading, reload]);
+  }, [liveTotal, offset, refreshing, reload]);
   useEffect(() => {
-    if (!loading && pending.current) {
+    if (!refreshing && pending.current) {
       pending.current = false;
       if (offset === 0) reload();
     }
-  }, [loading, offset, reload]);
+  }, [refreshing, offset, reload]);
 }

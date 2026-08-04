@@ -77,6 +77,35 @@ def test_demo_docs_match_current_director() -> None:
         )
 
 
+def test_coverage_keeps_gate_a1_evidence_boundary() -> None:
+    """Built/wired coverage must not be promoted to complete E2E proof before Gate A1."""
+    coverage = _read(COVERAGE)
+
+    assert "16/16 built and wired" in coverage, (
+        "docs/demo-coverage.md must describe implementation coverage as built and wired"
+    )
+    assert "Gate A1 pending" in coverage, (
+        "docs/demo-coverage.md must retain the acceptance boundary until PR-D/PR-E land"
+    )
+    for gap in ("PR-D", "3.1", "3.2", "PR-E", "3.4", "3.5", "3.6"):
+        assert gap in coverage, f"docs/demo-coverage.md omits the remaining {gap} evidence gap"
+    for criterion in ("3.1", "3.2", "3.4", "3.5", "3.6"):
+        assert re.search(rf"^\| {re.escape(criterion)} \|[^\n]*\| ◑ ", coverage, re.M), (
+            f"docs/demo-coverage.md must mark pending criterion {criterion} partial"
+        )
+
+    forbidden = (
+        r"16/16[^\n]{0,100}"
+        r"(?:demonstrable|E2E[- ]?(?:verified|proven)|verified by `?make demo-e2e)",
+        r"(?:every|all) scored (?:item|behavior)s?[^\n]{0,100}"
+        r"(?:verified end-to-end|shown & verified)",
+    )
+    for pattern in forbidden:
+        assert re.search(pattern, coverage, re.I) is None, (
+            f"docs/demo-coverage.md restored a pre-Gate-A1 readiness claim: {pattern!r}"
+        )
+
+
 def test_no_real_customer_claim() -> None:
     """Seeded/simulated impact customers are never presented as real ones."""
     sources = [(p, _read(p)) for p in _CUSTOMER_CLAIM_FILES]
