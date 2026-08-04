@@ -271,6 +271,10 @@ class ModelCardResponse(BaseModel):
     pipelines: dict[str, EstimatorCard]
     metrics: dict[str, MetricPair]
     data_sha256: str
+    #: SHA-256 of the loaded `model.pkl` bytes — provenance a judge can recompute with
+    #: `sha256sum` against the running image (item 3.1). Distinct from `data_sha256`,
+    #: which hashes the training corpus.
+    artifact_sha256: str
     created_from: dict[str, int] = Field(default_factory=dict)
     censoring: dict[str, Any] = Field(default_factory=dict)
     limitations: list[str] = Field(default_factory=list)

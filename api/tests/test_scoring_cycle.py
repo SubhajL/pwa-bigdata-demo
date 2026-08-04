@@ -26,15 +26,15 @@ from pwa_ml.predict import CRITICAL_BELOW, WARNING_BELOW, Bundle
 
 from app.features import MAX_STALENESS_S
 from app.health_store import latest_health
-from app.model import get_bundle
+from app.model import get_loaded
 from app.scoring import ScoringDeps, run_scoring_loop, score_all
 from app.ws import TwinHub
 
 
 def _bundle() -> Bundle:
-    bundle = get_bundle("")
-    assert bundle is not None, "the shipped artifact must load; build it with `python -m pwa_ml`"
-    return bundle
+    loaded = get_loaded("")
+    assert loaded is not None, "the shipped artifact must load; build it with `python -m pwa_ml`"
+    return loaded.bundle
 
 
 def _deps(pool: ConnectionPool, hub: TwinHub | None = None, **kw: float) -> ScoringDeps:

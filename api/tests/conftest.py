@@ -9,6 +9,8 @@ there would turn a broken gate green and silently retire the integration coverag
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import pathlib
 import shutil
@@ -186,17 +188,56 @@ def model_artifact() -> pathlib.Path:
 
     Deliberately NOT a `tmp_path` model. Scored item 3.1 is about the artifact that ships,
     and slice S6's whole claim is that the API serves *that* file through
-    `app.model.get_bundle`. Training into a temporary directory would test a model the
+    `app.model.get_loaded`. Training into a temporary directory would test a model the
     demo never loads — the exact failure `ml/tests/test_shipped_artifact.py` was written
     to prevent. Building it here rather than skipping keeps the S6 acceptance tests
     meaningful on a fresh clone; it takes about two seconds.
+
+    Also rebuilds when the sibling card does not BIND the local artifact — its
+    `artifact_sha256` is absent, unreadable, or differs from the digest of the local
+    `model.pkl` bytes. The card is committed while the pkl is machine-local, so a pulled
+    branch can pair a fresh card with an older local artifact; the API now refuses that
+    pair, and without this digest compare every /api/model test would 503 for the wrong
+    reason (review-workflow MEDIUM, round 3, reproduced by execution).
+    """
+    return _ensure_bound_artifact()
+
+
+def _ensure_bound_artifact() -> pathlib.Path:
+    """Rebuild `ml/artifacts` when the local card does not bind the local pkl, then make
+    sure no earlier-primed loader cache still describes the pre-rebuild bytes.
+
+    Callable outside the session fixture so the rebuild-consistency regression can
+    exercise exactly the code the fixture runs (g-check round 4).
     """
     artifact = ML_ROOT / "artifacts" / "model.pkl"
-    if not artifact.is_file():
+    card_path = ML_ROOT / "artifacts" / "model_card.json"
+    stale = not artifact.is_file()
+    if not stale:
+        try:
+            card = json.loads(card_path.read_text(encoding="utf-8"))
+            # A non-mapping document ([]/"x") is as unbound as a missing field.
+            stale = not isinstance(card, dict) or card.get(
+                "artifact_sha256"
+            ) != hashlib.sha256(artifact.read_bytes()).hexdigest()
+        except (OSError, ValueError):
+            stale = True
+    if stale:
         subprocess.run(
             [sys.executable, "-m", "pwa_ml"],
             cwd=ML_ROOT, capture_output=True, text=True, check=True, timeout=600,
         )
+        # The loader cache is pathname-keyed and DELIBERATELY survives file replacement
+        # (that is the production provenance guarantee). A rebuild owned by this fixture
+        # must therefore drop it, or a test that primed the cache earlier keeps serving
+        # the pre-rebuild bundle against the post-rebuild card (g-check round-4 MEDIUM).
+        from app.model import _load_cached
+
+        _load_cached.cache_clear()
+        rebuilt = json.loads(card_path.read_text(encoding="utf-8"))
+        digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+        if rebuilt.get("artifact_sha256") != digest:  # pragma: no cover - build invariant
+            raise RuntimeError("`python -m pwa_ml` produced an unbound artifact/card pair")
     if not artifact.is_file():  # pragma: no cover - the build above either works or raises
         raise RuntimeError(f"{artifact} still absent after `python -m pwa_ml`")
     return artifact

@@ -37,6 +37,7 @@ const CARD: ModelCardResponse = {
   },
   metrics: { health: { model_mae: 0.15, baseline_mae: 17.02 }, pttf: { model_mae: 30.9, baseline_mae: 102.0 } },
   data_sha256: "b847664d4ab11777c0ffee", created_from: {}, censoring: {}, limitations: ["synthetic wear model"],
+  artifact_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   datasets: [
     { name: "healthy", lifecycle_id: "lc-0", health_score: 99.5, pttf_hours: 527.4, pttf_out_of_range: true, status: "normal" },
     { name: "degraded", lifecycle_id: "lc-9", health_score: 30.1, pttf_hours: 0, pttf_out_of_range: false, status: "critical" },
@@ -113,6 +114,16 @@ describe("ModelCard", () => {
     expect(within(card).getByText("SIMULATED")).toBeInTheDocument();
   });
 
+  it("exposes the loaded artifact hash for literal DOM↔API comparison (item 3.1 provenance)", () => {
+    render(<ModelCard card={CARD} />);
+    const sha = screen.getByTestId("model-artifact-sha");
+    // The FULL hash rides a machine-readable attribute — the E2E compares it to the API
+    // string-for-string, so no truncation/formatting may touch it.
+    expect(sha).toHaveAttribute("data-sha256", CARD.artifact_sha256);
+    // A human still sees a recognizable prefix on screen.
+    expect(sha).toHaveTextContent(CARD.artifact_sha256.slice(0, 12));
+  });
+
   it("distinguishes loading from unavailable when there is no card", () => {
     const { rerender } = render(<ModelCard card={null} loading />);
     expect(screen.getByText(/กำลังโหลด/)).toBeInTheDocument();
@@ -130,6 +141,33 @@ describe("DatasetCompare", () => {
     // …and screen readers hear "at least", not an exact value (a11y for the censored bound).
     expect(screen.getByText("อย่างน้อย")).toBeInTheDocument();
     expect(within(screen.getByTestId("dataset-compare")).getByText("SIMULATED")).toBeInTheDocument();
+  });
+
+  it("exposes exact typed values on each tile so the rendered DOM matches the API literally", () => {
+    render(<DatasetCompare datasets={CARD.datasets as DatasetScore[]} />);
+    // Untouched API values as attributes: the E2E reads THESE, so display rounding (Num)
+    // can never drift the evidence away from what /api/model actually served.
+    const healthy = screen.getByTestId("dataset-healthy");
+    expect(healthy).toHaveAttribute("data-health-score", "99.5");
+    expect(healthy).toHaveAttribute("data-pttf-hours", "527.4");
+    expect(healthy).toHaveAttribute("data-pttf-lower-bound", "true");
+    const degraded = screen.getByTestId("dataset-degraded");
+    expect(degraded).toHaveAttribute("data-health-score", "30.1");
+    expect(degraded).toHaveAttribute("data-pttf-hours", "0");
+    expect(degraded).toHaveAttribute("data-pttf-lower-bound", "false");
+  });
+
+  it("marks the VISIBLE Health and PTTF numbers a judge reads (not just metadata attributes)", () => {
+    render(<DatasetCompare datasets={CARD.datasets as DatasetScore[]} />);
+    // EXACT text, not containment: "22.0" must not be satisfied by a rendered "122.0"
+    // (review round 3 — toHaveTextContent is substring-based and false-passed exactly that).
+    const healthy = screen.getByTestId("dataset-healthy");
+    // 99.5 → formatInt rounds half-away-from-zero → "100"; 527.4 h / 24 → formatDecimal(…, 1) → "22.0".
+    expect(within(healthy).getByTestId("dataset-health-visible").textContent).toBe("100");
+    expect(within(healthy).getByTestId("dataset-pttf-days").textContent).toBe("22.0");
+    const degraded = screen.getByTestId("dataset-degraded");
+    expect(within(degraded).getByTestId("dataset-health-visible").textContent).toBe("30");
+    expect(within(degraded).getByTestId("dataset-pttf-days").textContent).toBe("0.0");
   });
 });
 

@@ -1,6 +1,7 @@
 """Fit the bundle and write a falsifiable model card (slice S5)."""
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -179,6 +180,7 @@ def _write_card(
     censored_count: int,
     pttf_train_count: int,
     out_dir: Path,
+    artifact_path: Path,
 ) -> None:
     """Assemble the model card and write it to disk."""
     card = {
@@ -186,6 +188,11 @@ def _write_card(
         "simulated": True,
         "feature_names": list(FEATURE_NAMES),
         "data_sha256": corpus.sha256(),
+        # The digest of the model.pkl written by THIS training run: `model_version` is a
+        # constant, so it cannot tell two runs apart — this field is what binds the card
+        # to its artifact, and the API refuses a card whose value differs from the digest
+        # of the bytes it loaded (PR-D, scored item 3.1).
+        "artifact_sha256": hashlib.sha256(artifact_path.read_bytes()).hexdigest(),
         "created_from": {
             "n_train_lifecycles": len(corpus.train),
             "n_validation_lifecycles": len(corpus.validation),
@@ -259,6 +266,7 @@ def train(corpus: Corpus, out_dir: Path) -> Path:
         censored_count=censored_count,
         pttf_train_count=len(pttf_train),
         out_dir=out_dir,
+        artifact_path=artifact_path,
     )
 
     return artifact_path

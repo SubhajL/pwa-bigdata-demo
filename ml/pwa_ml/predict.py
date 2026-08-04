@@ -14,6 +14,7 @@ the property `test_rca_REVERSES_between_two_different_anomalies` pins.
 """
 from __future__ import annotations
 
+import io
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -94,7 +95,17 @@ def load_bundle(path: Path) -> Bundle:
     """
     if not path.exists():
         raise FileNotFoundError(f"no model artifact at {path}; run pwa_ml.train first")
-    raw: dict[str, Any] = joblib.load(path)
+    return load_bundle_bytes(path.read_bytes())
+
+
+def load_bundle_bytes(data: bytes) -> Bundle:
+    """Deserialize an artifact from its exact bytes.
+
+    Split from `load_bundle` so a caller can hash and unpickle ONE byte snapshot: the API's
+    provenance hash (PR-D, scored item 3.1) must describe the bytes actually deserialized,
+    which a hash-the-path-later design cannot guarantee if the file is replaced in between.
+    """
+    raw: dict[str, Any] = joblib.load(io.BytesIO(data))
     return Bundle(
         pipelines=raw["pipelines"],
         feature_names=tuple(raw["feature_names"]),

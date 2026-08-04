@@ -19,6 +19,7 @@
     "bearing_temp_c_max"
   ],
   "data_sha256": "b847664d4ab11777141dccd8b413b770d94f8b58ecb3840ee2ede0aea76add1c",
+  "artifact_sha256": "22ba1d9ffdca9ef51f99efd74d1b91de35cf90f1c64bab96fa1a0346fd9adb76",
   "created_from": {
     "n_train_lifecycles": 28,
     "n_validation_lifecycles": 10

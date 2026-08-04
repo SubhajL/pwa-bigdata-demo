@@ -18,6 +18,7 @@ each one is closed by a test here that the degenerate implementation fails:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -89,6 +90,18 @@ def test_the_card_is_falsifiable_and_declares_synthetic_data(
     assert card["splits"]["train"] and card["splits"]["validation"]
     assert card["metrics"]["health"]["model_mae"] >= 0.0
     assert card["metrics"]["health"]["baseline_mae"] >= 0.0
+
+
+def test_the_card_records_the_digest_of_the_artifact_it_shipped_with(
+    artifacts: tuple[Path, dict[str, Any]],
+) -> None:
+    """PR-D card↔artifact binding: the card carries the SHA-256 of the `model.pkl` written
+    in the same training run, so a same-version card from a DIFFERENT run can never be
+    served as if it described this artifact — `model_version` alone cannot catch that,
+    because the version is a training-time constant."""
+    model_path, card = artifacts
+
+    assert card["artifact_sha256"] == hashlib.sha256(model_path.read_bytes()).hexdigest()
 
 
 # ── item 3.2: health and PTTF differ, materially, on UNSEEN data ────────────

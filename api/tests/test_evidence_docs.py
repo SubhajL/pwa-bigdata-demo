@@ -119,6 +119,51 @@ def test_no_real_customer_claim() -> None:
         )
 
 
+def test_preflight_verifies_served_artifact_provenance() -> None:
+    """Preflight must compare `/api/model`'s `artifact_sha256` to the bytes of the artifact
+    inside the running image (PR-D, item 3.1): one hash across API, UI, and this gate.
+
+    Deliberately matched against NON-comment lines only, and against the load-bearing
+    constructions rather than bare keywords — a deleted probe with its comment left behind
+    must fail here (review-workflow HIGH, 2026-08-05)."""
+    code = "\n".join(
+        line for line in _read(PREFLIGHT).splitlines() if not line.lstrip().startswith("#")
+    )
+    # (1) the served hash is extracted from /api/model json…
+    assert re.search(r"api_sha=\$\([\s\S]{0,200}artifact_sha256", code), (
+        "preflight no longer extracts artifact_sha256 from /api/model"
+    )
+    # (2) …a failing producer clears the value instead of keeping its stdout…
+    assert re.search(r"\|\|\s*api_sha=\"\"", code) and re.search(r"\|\|\s*img_sha=\"\"", code), (
+        "preflight must clear a digest whose producer exited non-zero (no `|| true` slop)"
+    )
+    # (3) …the in-container bytes are hashed (MODEL_PATH-aware, model.pkl fallback)…
+    assert re.search(r"img_sha=\$\([\s\S]{0,400}hashlib\.sha256", code), (
+        "preflight no longer hashes the artifact inside the running api container"
+    )
+    assert re.search(r"img_sha=\$\([\s\S]{0,400}model\.pkl", code), (
+        "the in-container hash lost its /srv/artifacts/model.pkl fallback path"
+    )
+    assert "MODEL_PATH" in code, (
+        "the in-container hash must honor the same MODEL_PATH override the API resolver does"
+    )
+    # (4) …both strings are validated as real digests before any verdict, with WHOLE-string
+    # anchors — an unanchored `=~ [0-9a-f]{64}` accepts a noisy multi-line producer whose
+    # output merely CONTAINS a digest (g-check round-4 LOW)…
+    assert code.count("=~ ^[0-9a-f]{64}$") >= 2, (
+        "preflight must validate BOTH values as anchored whole-string 64-hex digests"
+    )
+    # (5) …the verdict is a REAL equality between the two captured digests (an `elif true`
+    # mutation must fail here, not just delete-the-probe mutations; workflow M round 2)…
+    assert re.search(r'\[ "\$api_sha" = "\$img_sha" \]', code), (
+        "the match verdict must literally compare $api_sha to $img_sha"
+    )
+    # (6) …and the mismatch branch actually fails the gate.
+    assert re.search(
+        r"!= image file[\s\S]{0,120}FAILED=1", code
+    ), "the mismatch verdict must set FAILED=1"
+
+
 def test_preflight_is_not_called_cold_start() -> None:
     """`demo-preflight` preserves volumes; only `demo-down` produces a true cold start."""
     preflight = _read(PREFLIGHT)

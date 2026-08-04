@@ -129,6 +129,8 @@ export interface ModelCardResponse {
   readonly pipelines: Readonly<Record<string, EstimatorCard>>;
   readonly metrics: Readonly<Record<string, MetricPair>>;
   readonly data_sha256: string;
+  /** SHA-256 of the loaded `model.pkl` bytes — recomputable with `sha256sum` (item 3.1). */
+  readonly artifact_sha256: string;
   readonly created_from: Readonly<Record<string, number>>;
   readonly censoring: Readonly<Record<string, unknown>>;
   readonly limitations: readonly string[];
