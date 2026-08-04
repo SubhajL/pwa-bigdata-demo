@@ -66,7 +66,15 @@ class FakeSocket {
   }
 }
 
-function stubFetch(overrides: { sec?: SecResponse; impact?: ImpactResponse; emptyTopo?: boolean; failTopo?: boolean } = {}): void {
+function stubFetch(
+  overrides: {
+    sec?: SecResponse;
+    impact?: ImpactResponse;
+    emptyTopo?: boolean;
+    failTopo?: boolean;
+    demo?: { enabled: boolean; active_run_id: string | null; simulated: boolean };
+  } = {},
+): void {
   vi.stubGlobal("fetch", (input: RequestInfo | URL): Promise<Response> => {
     const url = String(input);
     const json = (body: unknown): Promise<Response> =>
@@ -78,6 +86,9 @@ function stubFetch(overrides: { sec?: SecResponse; impact?: ImpactResponse; empt
     if (url.includes("/api/twin/bands")) return json(BANDS);
     if (url.includes("/api/twin/sec/")) return json(overrides.sec ?? SEC);
     if (url.includes("/api/twin/impact/")) return json(overrides.impact ?? IMPACT);
+    // The generic {} fallback below keeps the demo panel HIDDEN in every other test —
+    // its probe requires a well-formed `{enabled: true}` before rendering anything.
+    if (url.includes("/api/demo/scenario") && overrides.demo) return json(overrides.demo);
     return Promise.resolve(new Response("{}", { status: 200, headers: { "content-type": "application/json" } }));
   });
 }
@@ -270,5 +281,18 @@ describe("R12 — accessibility of the loaded twin", () => {
     await mountLoaded();
     const p2 = within(screen.getByTestId("twin-schematic")).getByRole("button", { name: /P-2/ });
     expect(p2.getAttribute("aria-label")).toMatch(/สถานะ/);
+  });
+});
+
+describe("P0 — demo director wiring", () => {
+  it("shows the demo panel when the API reports controls enabled, hides it otherwise", async () => {
+    stubFetch({ demo: { enabled: true, active_run_id: "demo-normal-0a1b2c3d", simulated: true } });
+    await mountLoaded();
+    await screen.findByTestId("demo-scenario-panel");
+    expect(screen.getByTestId("demo-run-id")).toHaveTextContent("demo-normal-0a1b2c3d");
+    cleanup();
+    stubFetch(); // generic {} probe → the panel must not render
+    await mountLoaded();
+    expect(screen.queryByTestId("demo-scenario-panel")).toBeNull();
   });
 });

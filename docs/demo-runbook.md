@@ -20,6 +20,36 @@ Reset the fault mode any time with `make demo-scenario MODE=normal`.
 
 ---
 
+## 0b. The demo director — สาธิตเหตุการณ์ (P0, landed 2026-08-03)
+
+The simulator round-robins all 238 devices (~48 s per device), so a fault used to take up to
+a minute to become visible. The **demo-scenario API** injects it for **P-2 on command**
+instead — from the twin screen or curl — and the transitions land in seconds:
+
+* On **ศูนย์ควบคุม SCADA** (`/operations`), the **สาธิตเหตุการณ์** card (SIMULATED-badged,
+  right column) has four buttons: **จำลองแรงดันตก** (pressure drop → items 2.2/2.3/2.4/3.3
+  from one click), **จำลองอุปกรณ์เสื่อมสภาพ** (vibration anomaly), **จำลองข้อมูลเสีย (DLQ)**
+  (item 1.5), **คืนสู่สภาวะปกติ** (recovery). The card shows the active **run_id**; every
+  injected row in the database carries it (`source='DEMO'`).
+* Same thing over HTTP:
+  `curl -X POST localhost:8000/api/demo/scenario -H 'content-type: application/json' -d '{"mode":"pressure_drop","target":"P-2"}'`
+* What a fault does: one below-band reading flips P-2's symbol to **เฝ้าระวัง instantly**
+  (band path, at most `warning` by design), and the 24-h feature window is steered onto a
+  worn trajectory so the **real model** scores P-2 **critical (health ≈ 32) within one
+  scoring cycle** — red symbol ≤ 30 s, the honest item-3.3 chain. **คืนสู่สภาวะปกติ**
+  steers the window healthy again: recovery is likewise model-driven, ≤ 30 s.
+* Gated by `DEMO_CONTROLS=1` (set only in `infra/docker-compose.yml`); anywhere else the
+  endpoint answers 403 and the card does not render. Injections preserve the conservation
+  invariant (paired ledger rows) and never touch MQTT/BACKFILL rows.
+  **Accepted exposure:** on the demo stack the API port (8000) is host-published and the
+  control is unauthenticated, like every other write surface of this local demo
+  (feedback, DLQ browsing). Do not enable `DEMO_CONTROLS` on anything network-shared.
+
+This retires the cold-start timing constraint below: on a warm stack, press
+**คืนสู่สภาวะปกติ** then **จำลองแรงดันตก** and demonstrate the whole twin arc on cue.
+
+---
+
 ## Topic ๑ — Real-time Data Pipeline (35 pts) · screen: **คุณภาพข้อมูล** (`/pipeline`)
 
 | # | Trigger | Where to look | Expect | Reset |
@@ -58,9 +88,10 @@ ordered rows.
 > `PIPE-P2-TANK` and lists affected customers (2.4). A single below-band reading classifies at most as
 > `warning` by design (`api/app/bands.py`); the red symbol is the health path, not the band path.
 >
-> **⚠ Cold-start matters.** The live scoring window averages every reading in a clock-hour, so P-2 reads
-> red only near a **true cold start**. If the stack has been running a while, run **`make demo-down`**
-> (removes volumes) then **`make demo-preflight`**, and demonstrate the twin items within the first hour.
+> **⚠ Cold-start matters — unless you use the demo director (§0b).** The live scoring window
+> averages every reading in a clock-hour, so the *backfilled* P-2 reads red only near a true cold
+> start. On a warm stack, either run **`make demo-down`** then **`make demo-preflight`**, or simply
+> press **จำลองแรงดันตก** on the twin (§0b) — it steers the window deterministically at any stack age.
 
 ---
 

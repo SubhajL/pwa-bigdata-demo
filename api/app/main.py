@@ -28,6 +28,7 @@ from .db import get_pool
 from .ingest import PipelineStatus, RawMessage
 from .model import get_bundle, resolve_model_path
 from .routes import curated as curated_routes
+from .routes import demo as demo_routes
 from .routes import dlq as dlq_routes
 from .routes import pipeline as pipeline_routes
 from .routes import predict as predict_routes
@@ -227,6 +228,7 @@ app.include_router(dlq_routes.router)
 app.include_router(twin_routes.router)
 app.include_router(predict_routes.router)
 app.include_router(curated_routes.router)
+app.include_router(demo_routes.router)
 
 
 @app.get("/healthz")

@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -196,6 +197,27 @@ def _health_event(row: HealthRow, now: datetime) -> TwinEvent:
     )
 
 
+async def broadcast_scoring_events(hub: TwinHub, events: Sequence[TwinEvent]) -> None:
+    """Hand one cycle's frames to the hub, healthiest first, YIELDING between frames.
+
+    Two burst pathologies, both found on a warm stack where every roster pump is
+    scoreable (~229 health frames per cycle against a 64-asset subscriber buffer):
+
+    * Offered worst-first in one event-loop turn, `Subscriber._offer` sheds the
+      least-recently-updated asset — the WORST device, every cycle, forever. That
+      starves exactly the frame item 3.3 is scored on. Hence healthiest FIRST.
+    * Ordering alone cannot save a RECOVERY: `_evict_one` prefers all-`normal` buckets
+      regardless of recency, and a recovery is emitted exactly once (on the status
+      change), so one evicted frame leaves a connected twin red forever. Hence the
+      `sleep(0)` after every offer — it hands the loop to the socket tasks, which drain
+      at production rate, so pressure never builds on a healthy client. A genuinely
+      wedged client still degrades exactly as `app.ws` documents (recoveries first).
+    """
+    for event in reversed(events):
+        hub.broadcast(event)
+        await asyncio.sleep(0)
+
+
 async def run_scoring_loop(deps: ScoringDeps) -> None:
     """Score on a timer until cancelled, broadcasting each cycle's frames on the loop.
 
@@ -209,8 +231,7 @@ async def run_scoring_loop(deps: ScoringDeps) -> None:
         try:
             result = await asyncio.to_thread(score_all, deps, now=datetime.now(tz=UTC))
             if deps.twin_hub is not None:
-                for event in result.events:
-                    deps.twin_hub.broadcast(event)
+                await broadcast_scoring_events(deps.twin_hub, result.events)
         except asyncio.CancelledError:
             raise
         except Exception:

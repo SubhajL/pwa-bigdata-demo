@@ -77,10 +77,46 @@ class TwinEvent(BaseModel):
     value: float | None = None
 
 
-class ScenarioRequest(BaseModel):
-    """Run-ID-scoped demo scenario trigger (S-D scenario API)."""
-    scenario: str = Field(..., description="e.g. pump_anomaly | pressure_drop | bad_asset")
+#: The demo director's vocabulary (P0 scenario API). Fault modes steer the target's
+#: feature window onto a worn trajectory; `normal` steers it healthy; `bad_asset`
+#: dead-letters one unknown-asset message.
+DemoMode = Literal["anomaly", "pressure_drop", "bad_asset", "normal"]
+
+
+class DemoScenarioRequest(BaseModel):
+    """`POST /api/demo/scenario` — deterministic, targeted demo trigger (P0).
+
+    Environment-gated by `DEMO_CONTROLS=1`; `target` is ignored by `bad_asset`.
+    """
+
+    mode: DemoMode
+    target: str = Field(
+        default="P-2", max_length=64, description="Roster pump the scenario steers."
+    )
+
+
+class DemoScenarioResponse(BaseModel):
+    """What one scenario application did. `run_id` labels every injected row."""
+
     run_id: str
+    mode: DemoMode
+    target: str
+    injected_readings: int
+    dead_letters: int
+    removed_rows: int
+    simulated: bool = True
+
+
+class DemoStatusResponse(BaseModel):
+    """Whether demo controls are on, and the newest TELEMETRY-injection run.
+
+    `bad_asset` writes no telemetry (its evidence is the DLQ), so it does not move
+    `active_run_id` — the field answers "which scenario steers the twin now".
+    """
+
+    enabled: bool
+    active_run_id: str | None = None
+    simulated: bool = True
 
 
 # ── predictive maintenance (slice S6, scored items 3.3–3.6) ────────────────────────────

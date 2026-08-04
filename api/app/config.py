@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     #: does not bake `data/` in, compose bind-mounts it (see infra/docker-compose.yml).
     curated_path: str = ""
 
+    #: The demo-scenario endpoint (`POST /api/demo/scenario`). Default OFF, so the
+    #: injection surface simply does not respond outside an explicitly-configured demo
+    #: stack — compose turns it on; nothing else does.
+    demo_controls: bool = False
+
     #: Comma-separated browser origins allowed to call this API cross-origin.
     #:
     #: Defaulted, not required, so every existing `Settings()` call site keeps working.

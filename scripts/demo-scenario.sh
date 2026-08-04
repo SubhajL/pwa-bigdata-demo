@@ -28,3 +28,16 @@ echo "→ switching simulator to FAULT_MODE=$MODE …"
 FAULT_MODE="$MODE" "${COMPOSE[@]}" up -d simulator >/dev/null
 echo "✓ simulator recreated with FAULT_MODE=$MODE"
 echo "  (allow ~10-15s for the new run's telemetry to reach the twin / pipeline before asserting)"
+
+# A `normal` reset must also clear anything the P0 demo DIRECTOR injected
+# (POST /api/demo/scenario) — restarting the simulator alone leaves `source='DEMO'`
+# rows steering the twin. Best-effort: skipped silently when the API is down or
+# DEMO_CONTROLS is off (403), both states in which no director rows can be fresh.
+if [ "$MODE" = "normal" ]; then
+  API_BASE="${API_BASE:-http://localhost:8000}"
+  if curl -sf -X POST "$API_BASE/api/demo/scenario" \
+      -H 'content-type: application/json' \
+      -d '{"mode":"normal","target":"P-2"}' >/dev/null 2>&1; then
+    echo "✓ demo director reset (P-2 window steered healthy)"
+  fi
+fi

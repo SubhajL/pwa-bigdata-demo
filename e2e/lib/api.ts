@@ -60,6 +60,36 @@ export function setFault(mode: FaultMode): void {
   execSync(`FAULT_MODE=${mode} docker compose -f "${COMPOSE}" up -d simulator`, { stdio: "ignore" });
 }
 
+// ── P0 demo-scenario API (the deterministic director; no docker round-trip) ──────────────
+
+export type DemoMode = "anomaly" | "pressure_drop" | "bad_asset" | "normal";
+
+export interface DemoScenarioResult {
+  run_id: string;
+  mode: DemoMode;
+  target: string;
+  injected_readings: number;
+  dead_letters: number;
+  removed_rows: number;
+  simulated: boolean;
+}
+
+/** POST /api/demo/scenario — inject a targeted scenario NOW (DEMO_CONTROLS=1 stacks only). */
+export async function postScenario(mode: DemoMode, target = "P-2"): Promise<DemoScenarioResult> {
+  const res = await fetch(`${API_BASE}/api/demo/scenario`, {
+    method: "POST",
+    headers: { "content-type": "application/json", connection: "close" },
+    body: JSON.stringify({ mode, target }),
+  });
+  if (!res.ok) throw new Error(`POST /api/demo/scenario(${mode}) → ${res.status}`);
+  return (await res.json()) as DemoScenarioResult;
+}
+
+/** GET /api/demo/scenario — {enabled, active_run_id}. */
+export function demoStatus(): Promise<{ enabled: boolean; active_run_id: string | null }> {
+  return apiJson("/api/demo/scenario");
+}
+
 /** Restart the MQTT broker (item 1.2 disconnect). */
 export function restartBroker(): void {
   execSync(`docker compose -f "${COMPOSE}" restart mosquitto`, { stdio: "ignore" });

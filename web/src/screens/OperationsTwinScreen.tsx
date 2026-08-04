@@ -6,6 +6,7 @@ import { SimulatedBadge } from "@/components/SimulatedBadge";
 import { StatusChip, type StatusKind } from "@/components/StatusChip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
+import { DemoScenarioPanel } from "@/features/twin/DemoScenarioPanel";
 import { ImpactPanel } from "@/features/twin/ImpactPanel";
 import { ProcessSchematic } from "@/features/twin/ProcessSchematic";
 import { SecTooltip } from "@/features/twin/SecTooltip";
@@ -237,6 +238,8 @@ export function OperationsTwinScreen(): JSX.Element {
             <div className="flex flex-col gap-4">
               {selected != null && <SecTooltip assetId={selected} sec={displayedSec} loading={secLoading} />}
               <ImpactPanel impact={activeImpact} loading={impactLoading} />
+              {/* Renders ONLY when the API reports DEMO_CONTROLS on (self-hiding). */}
+              <DemoScenarioPanel />
             </div>
           </div>
           <footer className="mt-2 flex items-center gap-2 text-dense text-on-surface-variant">

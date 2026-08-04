@@ -35,7 +35,7 @@ export function ImpactPanel({ impact, loading }: ImpactPanelProps): JSX.Element 
             </p>
             <ul className="flex flex-col gap-1">
               {impact.customers.map((c) => (
-                <li key={c.customer_id} className="flex justify-between text-dense">
+                <li key={c.customer_id} data-testid="impact-customer" className="flex justify-between text-dense">
                   <span className="text-on-surface">{c.customer_id}</span>
                   <span className="text-on-surface-variant">{c.area}</span>
                 </li>
