@@ -17,10 +17,11 @@ export interface SecTooltipProps {
  * a real 0.25 as "0"). A null `sec_kwh_per_m3` — a known pump with no usable power/flow pair —
  * renders "—" with the API's `detail`, never 0 and never NaN. Every value is SIMULATED.
  *
- * With a computed value the card also renders the DERIVATION (PR-C): both inputs, both
- * observation timestamps, and the pair skew, so a judge can recompute the quotient from
- * what is on screen. The data-* attributes carry the raw API values for the E2E gate and
- * are ABSENT when there is no usable pair — automation must never read a fake input.
+ * With a computed value the card also renders the DERIVATION (PR-C): both inputs to four
+ * decimals, both observation timestamps, and the pair skew. The approximate marker makes
+ * the display's rounding explicit while retaining enough visible precision to reproduce the
+ * three-decimal result. The data-* attributes carry raw API values for presence/freshness
+ * checks and are ABSENT when there is no usable pair — automation must never read a fake input.
  */
 export function SecTooltip({ assetId, sec, loading }: SecTooltipProps): JSX.Element {
   const value = sec?.sec_kwh_per_m3 ?? null;
@@ -43,7 +44,7 @@ export function SecTooltip({ assetId, sec, loading }: SecTooltipProps): JSX.Elem
           <p className="text-on-surface-variant">กำลังโหลด…</p>
         ) : (
           <>
-            <p className="text-metric tabular">
+            <p data-testid="sec-result" className="text-metric tabular">
               {value == null ? DASH : formatDecimal(value, 3)}
               <span className="ms-2 text-dense text-on-surface-variant">kWh/m³</span>
             </p>
@@ -64,12 +65,17 @@ function SecDerivation({ sec }: { readonly sec: SecResponse }): JSX.Element {
   return (
     <div className="mt-2 flex flex-col gap-1 text-dense text-on-surface-variant">
       <p data-testid="sec-formula" className="tabular">
-        = กำลังไฟฟ้า {sec.power_kw == null ? DASH : formatDecimal(sec.power_kw, 1)} kW ÷ อัตราการไหล{" "}
-        {sec.flow_m3h == null ? DASH : formatDecimal(sec.flow_m3h, 1)} m³/h
+        ≈ กำลังไฟฟ้า {sec.power_kw == null ? DASH : formatDecimal(sec.power_kw, 4)} kW ÷ อัตราการไหล{" "}
+        {sec.flow_m3h == null ? DASH : formatDecimal(sec.flow_m3h, 4)} m³/h
       </p>
       <p data-testid="sec-observed" className="tabular">
-        วัดเมื่อ · กำลังไฟฟ้า {at(sec.power_observed_at)} · อัตราการไหล {at(sec.flow_observed_at)} ·
-        ช่วงห่างของคู่ค่า {sec.skew_s == null ? DASH : formatDecimal(sec.skew_s, 1)} วินาที
+        วัดเมื่อ · กำลังไฟฟ้า <span data-testid="sec-power-observed">{at(sec.power_observed_at)}</span>
+        {" · "}อัตราการไหล <span data-testid="sec-flow-observed">{at(sec.flow_observed_at)}</span>
+        {" · "}ช่วงห่างของคู่ค่า{" "}
+        <span data-testid="sec-skew">
+          {sec.skew_s == null ? DASH : formatDecimal(sec.skew_s, 1)}
+        </span>{" "}
+        วินาที
       </p>
     </div>
   );

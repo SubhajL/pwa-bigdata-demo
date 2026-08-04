@@ -32,20 +32,37 @@ function sec(over: Partial<SecResponse> = {}): SecResponse {
 
 describe("SecTooltip derivation evidence", () => {
   it("shows the recomputable derivation: inputs, timestamps, skew, formula, result", () => {
-    render(<SecTooltip assetId="P-2" sec={sec()} loading={false} />);
+    const power = 10.5678;
+    const flow = 201.2345;
+    render(
+      <SecTooltip
+        assetId="P-2"
+        sec={sec({ sec_kwh_per_m3: power / flow, power_kw: power, flow_m3h: flow })}
+        loading={false}
+      />,
+    );
     const card = screen.getByTestId("sec-card");
-    expect(card).toHaveAttribute("data-sec", "0.0525");
-    expect(card).toHaveAttribute("data-power-kw", "10.5");
-    expect(card).toHaveAttribute("data-flow-m3h", "200");
+    expect(card).toHaveAttribute("data-sec", String(power / flow));
+    expect(card).toHaveAttribute("data-power-kw", String(power));
+    expect(card).toHaveAttribute("data-flow-m3h", String(flow));
     expect(card).toHaveAttribute("data-skew-s", "2");
-    // formula line shows both inputs; observed line both timestamps and the skew
-    expect(screen.getByTestId("sec-formula").textContent).toMatch(/10\.5/);
-    expect(screen.getByTestId("sec-formula").textContent).toMatch(/200/);
+    // The visible formula, not hidden data attributes, carries enough precision and labels
+    // the rounded display as approximate so a judge can reproduce the shown result.
+    const formulaText = screen.getByTestId("sec-formula").textContent ?? "";
+    expect(formulaText).toContain("≈");
+    expect(formulaText).toMatch(/10\.5678/);
+    expect(formulaText).toMatch(/201\.2345/);
+    const formulaNumbers = formulaText.match(/\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+    expect(formulaNumbers).toHaveLength(2);
+    const resultText = screen.getByTestId("sec-result").textContent ?? "";
+    const displayedResult = Number(resultText.match(/\d+(?:\.\d+)?/)?.[0]);
+    expect(displayedResult).toBeCloseTo(formulaNumbers[0] / formulaNumbers[1], 3);
     expect(screen.getByTestId("sec-observed").textContent).toMatch(/10:00:05/);
     expect(screen.getByTestId("sec-observed").textContent).toMatch(/10:00:03/);
     expect(screen.getByTestId("sec-observed").textContent).toMatch(/2/);
-    // the headline result is the rounded quotient of the shown inputs (3 decimals)
-    expect(screen.getByText(/0\.05[23]/)).toBeInTheDocument();
+    expect(screen.getByTestId("sec-power-observed")).toHaveTextContent("10:00:05");
+    expect(screen.getByTestId("sec-flow-observed")).toHaveTextContent("10:00:03");
+    expect(screen.getByTestId("sec-skew")).toHaveTextContent("2.0");
     expect(screen.getByLabelText(SIMULATED_ARIA_LABEL)).toBeInTheDocument();
   });
 
@@ -69,6 +86,7 @@ describe("SecTooltip derivation evidence", () => {
     expect(card).not.toHaveAttribute("data-sec");
     expect(card).not.toHaveAttribute("data-power-kw");
     expect(card).not.toHaveAttribute("data-flow-m3h");
+    expect(card).not.toHaveAttribute("data-skew-s");
     expect(screen.getByText(/—/)).toBeInTheDocument();
     expect(screen.getByText(/readings are stale/)).toBeInTheDocument();
     expect(screen.queryByTestId("sec-formula")).toBeNull();
@@ -79,7 +97,10 @@ describe("SecTooltip derivation evidence", () => {
     render(
       <SecTooltip assetId="P-2" sec={sec({ flow_observed_at: null, skew_s: null })} loading={false} />,
     );
-    expect(screen.getByTestId("sec-observed").textContent).not.toMatch(/NaN/);
-    expect(screen.getByTestId("sec-observed").textContent).toMatch(/—/);
+    const card = screen.getByTestId("sec-card");
+    const observed = screen.getByTestId("sec-observed").textContent;
+    expect(card).not.toHaveAttribute("data-skew-s");
+    expect(observed).not.toMatch(/NaN/);
+    expect(observed).toMatch(/—/);
   });
 });

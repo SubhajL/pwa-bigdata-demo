@@ -85,3 +85,122 @@ verification. Final test count in the new file: 7.
 
 ## Not delegated
 Everything (Claude-implemented). Delegate token cost: 0.
+
+---
+
+# 2026-08-05 Review-remediation report (PR-A through PR-C)
+
+## Goal and evidence boundary
+
+Remediate the formal changes-requested review recorded against merged
+`main@3fffdc73cff1f00d4f7e090e8de3cec6da0f6f28`: two HIGH, three MEDIUM, and one LOW
+finding. This is intentionally a narrow follow-up before PR-D. It does not claim Gate A1 or the
+remaining PR-D/PR-E judge-visible evidence.
+
+## Changes
+
+- `docs/demo-coverage.md` now says **16/16 built and wired**, marks Gate A1 pending, lists the
+  literal PR-D gaps for 3.1-3.2 and PR-E gaps for 3.4-3.6, and marks those five table rows partial.
+  `api/tests/test_evidence_docs.py` prevents a broad 16/16 E2E/verified claim from returning before
+  those gaps close.
+- `scripts/demo-reconnect.sh` starts one budget before Compose, actively bounds the Compose child,
+  and includes restart, committed-watermark acquisition, reconnect, and committed-row growth in the
+  same default 30-second budget. New `api/tests/test_demo_reconnect_script.py` covers both elapsed
+  fake-clock accounting and a genuinely hung Compose process.
+- `web/src/features/pipeline/useDlq.ts` owns a real `refreshing` state and a request generation token.
+  Live refresh coalesces repeated totals while a reload is in flight, then performs exactly one
+  follow-up. `pipelineHooks.test.tsx` exercises a deferred real reload rather than manufacturing an
+  impossible `loading=true` reload state.
+- `SecTooltip.tsx` labels its visible SEC calculation approximate, renders four-decimal inputs, and
+  exposes visible formula/result/timestamp/skew fields semantically. Unit and Playwright coverage
+  parse and recompute the visible formula, reject missing or blank metadata before numeric
+  conversion, cross-bind DOM metadata to the API, and verify visible timestamps/skew. A negative
+  missing-metadata unit test proves dashes cannot satisfy the metadata oracle.
+- `topic1-pipeline.spec.ts` pins the independent exact set of three required endpoint paths as well as
+  probe counts, failures, and latency.
+
+## TDD and regression proof
+
+- RED API: focused run produced 2 failures / 4 passes: the coverage document lacked the bounded
+  wording and slow Compose could false-pass the restart budget.
+- RED web: focused run produced 2 failures / 12 passes: repeated totals caused four requests rather
+  than two, and the visible SEC formula used rounded one-decimal inputs.
+- Independent QCHECK then found the Compose call still needed an active watchdog, visible
+  timestamp/skew fields and stronger API binding, an independent endpoint oracle, explicit partial
+  coverage markers, and request-generation ownership. Follow-up RED runs proved the missing partial
+  marker, hung subprocess, and semantic timestamp field before those fixes were applied.
+- Final focused result: API 7/7 and web 14/14, each repeated three times without failure.
+
+## Wiring verification
+
+| Changed producer / contract | Runtime consumer | Verification |
+|---|---|---|
+| Coverage evidence boundary | PR-D/PR-E roadmap and Gate A1 reporting | Static evidence-doc test |
+| Reconnect whole-operation budget | `make demo-e2e` and operator reconnect drill | Fake-clock, hung-process, and live broker restart |
+| `useDlq.refreshing` and generation ownership | `PipelineMonitorScreen` live DLQ refresh | Deferred-hook unit test and Topic 1 live E2E |
+| Visible SEC formula and metadata spans | `OperationsTwinScreen` / `SecTooltip` | Unit parsing plus API-bound scenario E2E |
+| Independent required endpoint set | Pipeline response-time table | Topic 1 live E2E exact-set assertion |
+
+## Validation at candidate contents
+
+- API: `314 passed in 101.07s`; Ruff passed; mypy passed for 56 source files.
+- Web: 64 files / `534 passed`; lint, typecheck, and production build passed.
+- Focused stability: API 7 tests x3 and web 14 tests x3 passed.
+- E2E TypeScript compilation, shell syntax, and `git diff --check` passed.
+- Warm `make demo-e2e`: `23 passed (1.5m)` on the isolated candidate worktree.
+- Real `scripts/demo-reconnect.sh`: reconnect and committed growth passed in 3 seconds.
+- Runtime restored to `normal`; director API reported active run `demo-normal-c7a0b6f9`.
+
+The first isolated-worktree preflight found that its ignored env file was absent and the default
+TimescaleDB host port was occupied. No volume was removed. The candidate was rerun with the existing
+primary checkout's Compose env-file path, which selects its configured non-conflicting port; no
+secret values were printed or changed.
+
+## Review disposition and remaining work
+
+The delegated read-only QCHECK re-review reported no remaining CRITICAL, HIGH, MEDIUM, or LOW
+findings in the six remediation scopes. This remains warm-stack evidence: no destructive cold reset
+was performed. PR-D and PR-E still own the five literal DOM/operator proof gaps listed above, and
+Gate A1 remains pending until those proofs exist.
+
+## Review (2026-08-05 04:31 +0700) - review-evidence-remediation staged tree
+
+### Reviewed
+
+- Repository: `pwa-bigdata-demo`.
+- Branch: `fix/review-evidence-remediation`.
+- Scope: staged working tree based on `3fffdc73cff1f00d4f7e090e8de3cec6da0f6f28`, limited to
+  the six requested review findings, their regressions, and this Coding Log report.
+- Inspected the complete staged diffs for the reconnect script/tests, evidence document/guard,
+  DLQ hook/tests, SEC component/tests/E2E, and endpoint-set E2E.
+- Verified call-site wiring for `PipelineMonitorScreen`, `OperationsTwinScreen`, `make demo-e2e`,
+  and the rendered response-time table; verified no migration, API schema, or deployment change.
+- Review evidence: `git diff --cached --check`; API 314 tests + Ruff + mypy; web 534 tests + lint +
+  typecheck + build; focused tests x3; E2E TypeScript compilation; warm 23-test live suite; real
+  reconnect/committed-growth drill.
+
+### Findings
+
+- CRITICAL - No findings.
+- HIGH - No findings.
+- MEDIUM - No findings.
+- LOW - No findings.
+
+### Open Questions / Assumptions
+
+- PR-D and PR-E remain responsible for the explicitly documented literal evidence gaps for
+  criteria 3.1-3.2 and 3.4-3.6; this remediation intentionally does not pre-empt their scope.
+- Gate A1 must run at its eventual exact merged candidate SHA before the coverage document can make
+  a complete E2E-readiness claim.
+
+### Recommended Tests / Validation
+
+- Completed the full source, focused stability, TypeScript, warm browser, and live reconnect gates
+  listed above. Repeat the exact-SHA warm suite after merge because merge identity is a distinct
+  evidence boundary.
+
+### Rollout Notes
+
+- No schema, migration, feature flag, production deployment, or rollback step is involved.
+- The live validation was non-destructive and warm-stack only. Runtime was explicitly returned to
+  the normal simulator/director scenario after the reconnect drill.

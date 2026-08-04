@@ -8,6 +8,7 @@
 set -euo pipefail
 
 API="${API_BASE:-http://localhost:8000}"
+BUDGET_S="${DEMO_RECONNECT_BUDGET_S:-30}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 COMPOSE=(docker compose -f "$ROOT/infra/docker-compose.yml")
 
@@ -24,6 +25,28 @@ committed() { # conservation.telemetry — validated rows the hypertable accepte
 
 is_int() { [[ "$1" =~ ^[0-9]+$ ]]; }
 
+if ! is_int "$BUDGET_S" || [ "$BUDGET_S" -le 0 ]; then
+  echo "✗ DEMO_RECONNECT_BUDGET_S must be a positive integer" >&2
+  exit 2
+fi
+
+restart_broker() {
+  # Python is already a runtime dependency of this script's JSON readers. Its subprocess
+  # timeout actively terminates a stuck Compose client instead of checking only after return.
+  python3 - "$BUDGET_S" "${COMPOSE[@]}" restart mosquitto <<'PY'
+import subprocess
+import sys
+
+budget_s = int(sys.argv[1])
+command = sys.argv[2:]
+try:
+    result = subprocess.run(command, stdout=subprocess.DEVNULL, timeout=budget_s, check=False)
+except subprocess.TimeoutExpired:
+    raise SystemExit(124) from None
+raise SystemExit(result.returncode)
+PY
+}
+
 # The baseline must be EVIDENCE, not a default: an unreadable API converted to 0 would let
 # the first healthy poll "prove" growth that never happened post-restart. Fail closed.
 pre_state="$(field state)"
@@ -34,8 +57,18 @@ if [ "$pre_state" != "connected" ] || ! is_int "$before"; then
 fi
 echo "→ baseline: state=$pre_state received=$before"
 echo "→ restarting the broker (docker compose restart mosquitto) …"
-"${COMPOSE[@]}" restart mosquitto >/dev/null
 start=$(date +%s)
+restart_status=0
+restart_broker || restart_status=$?
+elapsed=$(( $(date +%s) - start ))
+if [ "$restart_status" -eq 124 ] || [ "$elapsed" -gt "$BUDGET_S" ]; then
+  echo "✗ restart command exceeded the ${BUDGET_S}s budget (${elapsed}s elapsed)" >&2
+  exit 1
+fi
+if [ "$restart_status" -ne 0 ]; then
+  echo "✗ docker compose restart mosquitto failed (status=$restart_status)" >&2
+  exit "$restart_status"
+fi
 
 # Committed watermark is taken AFTER the restart command returns: messages delivered and
 # queued BEFORE the outage drain in the bounce window and must not count as "resumed
@@ -47,7 +80,7 @@ while [ -z "$committed_before" ]; do
   sleep 1
   committed_before="$(committed)"
   is_int "$committed_before" || committed_before=""
-  if [ $(( $(date +%s) - start )) -ge 15 ]; then
+  if [ $(( $(date +%s) - start )) -ge "$BUDGET_S" ]; then
     echo "✗ could not read a committed-rows watermark after restart (API unhealthy)" >&2
     exit 1
   fi
@@ -63,12 +96,12 @@ while true; do
   elapsed=$(( $(date +%s) - start ))
   if [ "$state" = "connected" ] && [ "$recv" -gt "$before" ] && [ "$comm" -gt "$committed_before" ]; then
     echo "✓ reconnected AND committed ingest resumed in ${elapsed}s  (state=connected, received ${before}→${recv}, committed ${committed_before}→${comm})"
-    if [ "$elapsed" -le 30 ]; then exit 0; fi
-    echo "✗ but that exceeded the 30s budget for item 1.2" >&2
+    if [ "$elapsed" -le "$BUDGET_S" ]; then exit 0; fi
+    echo "✗ but that exceeded the ${BUDGET_S}s budget for item 1.2" >&2
     exit 1
   fi
-  if [ "$elapsed" -ge 30 ]; then
-    echo "✗ did NOT reconnect+commit within 30s (state=$state received=$recv committed=$comm)" >&2
+  if [ "$elapsed" -ge "$BUDGET_S" ]; then
+    echo "✗ did NOT reconnect+commit within ${BUDGET_S}s (state=$state received=$recv committed=$comm)" >&2
     exit 1
   fi
   sleep 1

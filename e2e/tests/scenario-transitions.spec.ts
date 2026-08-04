@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { apiJson, demoStatus, dlqTotal, pipelineStatus, pollUntil, postScenario } from "../lib/api";
 
@@ -26,6 +26,20 @@ const P2 = '[data-asset="P-2"]';
 /** DOM-only read of P-2's rendered status. */
 function p2Dom(page: Page): Promise<string | null> {
   return page.locator(P2).getAttribute("data-status");
+}
+
+/** Read a required numeric DOM attribute without allowing Number(null) to become zero. */
+async function requiredFiniteAttr(locator: Locator, name: string): Promise<number> {
+  const raw = await locator.getAttribute(name);
+  const trimmed = raw?.trim() ?? "";
+  expect(trimmed, `${name} must be present and non-blank`).not.toBe("");
+  const value = Number(trimmed);
+  expect(Number.isFinite(value), `${name}=${trimmed || "<missing>"} must be finite`).toBe(true);
+  return value;
+}
+
+function visibleNumbers(text: string): number[] {
+  return [...text.matchAll(/\d+(?:\.\d+)?/g)].map((match) => Number(match[0]));
 }
 
 /** Load /operations once, with the socket open, and stamp the no-reload marker. */
@@ -171,33 +185,61 @@ test("P1 — anomaly drives the model path ≤30s and the SEC derivation on scre
     timeoutMs: 15_000,
     label: "SEC derivation attributes rendered for the selected pump",
   });
-  const attr = async (name: string): Promise<number> => Number(await card.getAttribute(name));
-  const secShown = await attr("data-sec");
-  const power = await attr("data-power-kw");
-  const flow = await attr("data-flow-m3h");
-  const skew = await attr("data-skew-s");
-  expect(Number.isFinite(secShown) && Number.isFinite(power) && Number.isFinite(flow)).toBe(true);
-  // data-skew-s must be PRESENT and finite — Number(null) is 0, which would let an
-  // absent attribute satisfy the budget check vacuously.
-  expect(Number.isFinite(skew), "data-skew-s present and finite").toBe(true);
+  const secShown = await requiredFiniteAttr(card, "data-sec");
+  const power = await requiredFiniteAttr(card, "data-power-kw");
+  const flow = await requiredFiniteAttr(card, "data-flow-m3h");
+  const skew = await requiredFiniteAttr(card, "data-skew-s");
   expect(flow).toBeGreaterThan(0);
-  // Recomputable: the shown result IS the quotient of the shown inputs.
-  expect(Math.abs(secShown - power / flow)).toBeLessThanOrEqual(1e-9 * Math.max(1, secShown));
   // The pair the card used respects the API's freshness budget (TWIN_MAX_PAIR_SKEW_S).
   expect(skew).toBeLessThanOrEqual(120);
-  await expect(page.getByTestId("sec-formula")).toBeVisible();
-  await expect(page.getByTestId("sec-observed")).toBeVisible();
+  const result = page.getByTestId("sec-result");
+  const formula = page.getByTestId("sec-formula");
+  const observed = page.getByTestId("sec-observed");
+  await expect(result).toBeVisible();
+  await expect(formula).toBeVisible();
+  await expect(observed).toBeVisible();
+  await expect(formula).toContainText("≈");
+  const resultNumbers = visibleNumbers((await result.textContent()) ?? "");
+  const formulaNumbers = visibleNumbers((await formula.textContent()) ?? "");
+  expect(resultNumbers, "visible SEC result contains one numeric value").toHaveLength(1);
+  expect(formulaNumbers, "visible formula contains power and flow").toHaveLength(2);
+  expect(resultNumbers[0]).toBeCloseTo(formulaNumbers[0] / formulaNumbers[1], 3);
+  expect(resultNumbers[0]).toBeCloseTo(secShown, 3);
+  expect(formulaNumbers[0]).toBeCloseTo(power, 4);
+  expect(formulaNumbers[1]).toBeCloseTo(flow, 4);
+  const powerObserved = page.getByTestId("sec-power-observed");
+  const flowObserved = page.getByTestId("sec-flow-observed");
+  const displayedSkew = page.getByTestId("sec-skew");
+  await expect(powerObserved).toBeVisible();
+  await expect(flowObserved).toBeVisible();
+  await expect(displayedSkew).toBeVisible();
+  const visibleSkew = Number((await displayedSkew.textContent())?.trim());
+  expect(Number.isFinite(visibleSkew), "visible pair skew is numeric").toBe(true);
+  expect(Math.abs(visibleSkew - skew), "visible pair skew matches DOM metadata").toBeLessThanOrEqual(
+    0.050_001,
+  );
 
   // The API derives by the same rule — the card renders the contract, not its own math.
   const api = await apiJson<{
     sec_kwh_per_m3: number | null;
     power_kw: number | null;
     flow_m3h: number | null;
+    power_observed_at: string | null;
+    flow_observed_at: string | null;
     skew_s: number | null;
   }>("/api/twin/sec/P-2");
   expect(api.sec_kwh_per_m3, "API returns a computed SEC during the anomaly").not.toBeNull();
   expect(api.power_kw).not.toBeNull();
   expect(api.flow_m3h).not.toBeNull();
+  expect(api.power_observed_at).not.toBeNull();
+  expect(api.flow_observed_at).not.toBeNull();
+  expect(api.skew_s).not.toBeNull();
+  expect(secShown).toBe(api.sec_kwh_per_m3);
+  expect(power).toBe(api.power_kw);
+  expect(flow).toBe(api.flow_m3h);
+  expect(skew).toBe(api.skew_s);
+  await expect(powerObserved).toHaveText((api.power_observed_at as string).slice(11, 19));
+  await expect(flowObserved).toHaveText((api.flow_observed_at as string).slice(11, 19));
   expect(
     Math.abs((api.sec_kwh_per_m3 as number) - (api.power_kw as number) / (api.flow_m3h as number)),
   ).toBeLessThanOrEqual(1e-9);

@@ -42,6 +42,14 @@ function lat(over: Partial<LatencyResult> & { path: string }): LatencyResult {
   return { roundTripMs: 10, dbMs: 1, ok: true, status: 200, ...over };
 }
 
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 beforeEach(() => vi.clearAllMocks());
 afterEach(() => vi.useRealTimers());
 
@@ -128,7 +136,7 @@ describe("useRange", () => {
 describe("useDlqLiveRefresh", () => {
   function dlqResult(over: Partial<UseDlqResult> = {}): UseDlqResult {
     return {
-      page: null, offset: 0, loading: false, error: null, stale: false,
+      page: null, offset: 0, loading: false, refreshing: false, error: null, stale: false,
       setOffset: () => {}, reload: () => {}, ...over,
     };
   }
@@ -160,12 +168,55 @@ describe("useDlqLiveRefresh", () => {
     const reload = vi.fn();
     const { rerender } = renderHook(
       ({ total, dlq }: { total: number | null; dlq: UseDlqResult }) => useDlqLiveRefresh(dlq, total),
-      { initialProps: { total: 5 as number | null, dlq: dlqResult({ reload, loading: true }) } },
+      { initialProps: { total: 5 as number | null, dlq: dlqResult({ reload, refreshing: true }) } },
     );
-    rerender({ total: 6, dlq: dlqResult({ reload, loading: true }) }); // change mid-flight
-    rerender({ total: 7, dlq: dlqResult({ reload, loading: true }) }); // another change
+    rerender({ total: 6, dlq: dlqResult({ reload, refreshing: true }) }); // change mid-flight
+    rerender({ total: 7, dlq: dlqResult({ reload, refreshing: true }) }); // another change
     expect(reload).not.toHaveBeenCalled(); // no abort-storm: in-flight page left to settle
-    rerender({ total: 7, dlq: dlqResult({ reload, loading: false }) }); // request settled
+    rerender({ total: 7, dlq: dlqResult({ reload, refreshing: false }) }); // request settled
     expect(reload).toHaveBeenCalledTimes(1); // exactly one catch-up refetch
+  });
+
+  it("coalesces total changes behind a deferred REAL reload without aborting it", async () => {
+    const page = (count: number): DlqResponse => ({ count, limit: 25, offset: 0, items: [] });
+    const slowReload = deferred<DlqResponse>();
+    const catchUp = deferred<DlqResponse>();
+    let slowSignal: AbortSignal | undefined;
+    mFetchDlq
+      .mockResolvedValueOnce(page(5))
+      .mockImplementationOnce((_limit, _offset, signal) => {
+        slowSignal = signal;
+        return slowReload.promise;
+      })
+      .mockImplementationOnce(() => catchUp.promise);
+
+    const { result, rerender } = renderHook(
+      ({ total }) => {
+        const dlq = useDlq();
+        useDlqLiveRefresh(dlq, total);
+        return dlq;
+      },
+      { initialProps: { total: 5 } },
+    );
+    await act(async () => {});
+    expect(result.current.page?.count).toBe(5);
+
+    rerender({ total: 6 });
+    await act(async () => {});
+    expect(mFetchDlq).toHaveBeenCalledTimes(2);
+    expect(result.current.refreshing).toBe(true);
+    expect(slowSignal?.aborted).toBe(false);
+
+    rerender({ total: 7 });
+    rerender({ total: 8 });
+    await act(async () => {});
+    expect(mFetchDlq).toHaveBeenCalledTimes(2);
+    expect(slowSignal?.aborted).toBe(false);
+
+    await act(async () => slowReload.resolve(page(6)));
+    expect(mFetchDlq).toHaveBeenCalledTimes(3);
+    await act(async () => catchUp.resolve(page(8)));
+    expect(result.current.page?.count).toBe(8);
+    expect(result.current.refreshing).toBe(false);
   });
 });
