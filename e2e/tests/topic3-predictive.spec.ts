@@ -1,6 +1,14 @@
 import { expect, test } from "@playwright/test";
 
-import { apiJson } from "../lib/api";
+import {
+  API_BASE,
+  apiJson,
+  deleteFeedbackByNote,
+  feedbackCountByNote,
+  feedbackIdByNote,
+  pollUntil,
+  postScenario,
+} from "../lib/api";
 
 // Topic ๓ — AI Predictive Maintenance (30 pts). The predictive panel + its API.
 
@@ -125,14 +133,107 @@ test("3.4 — the Feedback Loop API persists and is exposed in Swagger (item 3.4
   expect(spec.paths["/api/feedback"]).toBeTruthy();
 });
 
-test("3.5 — the prioritized worklist is ranked worst-health first (item 3.5)", async ({ page }) => {
-  const items = await apiJson<{ rank: number; health_score: number }[]>("/api/worklist?limit=20");
+test("3.4b — a judge drives Swagger Try it out and the row PERSISTS in the database (item 3.4)", async ({ page }) => {
+  // The literal operator workflow: open /docs, expand POST /api/feedback, Try it out,
+  // Execute — then prove persistence in the database itself (there is deliberately no
+  // GET /api/feedback), and clean up exactly the rows this test wrote.
+  const marker = `e2e-swagger-${Date.now()}`;
+  try {
+    await page.goto(`${API_BASE}/docs`);
+    const op = page.locator(".opblock-post", { hasText: "/api/feedback" });
+    await op.locator(".opblock-summary").click();
+    await op.getByRole("button", { name: /try it out/i }).click();
+    await op.locator("textarea.body-param__text").fill(
+      JSON.stringify({ asset_id: "P-2", verdict: "confirmed", note: marker }),
+    );
+    await op.getByRole("button", { name: /^execute$/i }).click();
+
+    const response = op.locator(".live-responses-table");
+    // `:not(.col_header)` — the table's header cells share the response-col_* classes, so
+    // a bare .first() reads the literal word "Code" instead of the live status.
+    await expect(
+      response.locator("td.response-col_status:not(.col_header)").first(),
+    ).toHaveText("200");
+    const body = response.locator("td.response-col_description:not(.col_header)").first();
+    await expect(body).toContainText('"stored": true');
+    const shown = (await body.innerText()).match(/"id":\s*(\d+)/);
+    expect(shown, "the Swagger response must show the DB-returned id").not.toBeNull();
+    const uiId = Number(shown![1]);
+    expect(uiId).toBeGreaterThan(0);
+
+    // Bounded persistence verification: exactly one row carries this test's marker, and
+    // its DATABASE id is the id the judge just read in Swagger — the ack describes a real
+    // row, not a canned constant.
+    expect(feedbackCountByNote(marker)).toBe(1);
+    expect(feedbackIdByNote(marker)).toBe(uiId);
+    // The exact-removal proof belongs to the SUCCESS path: asserting it in finally would
+    // replace the real Swagger/persistence failure with a 0≠1 cleanup error (both review
+    // tiers; JS finally-throw semantics discard the pending exception).
+    expect(deleteFeedbackByNote(marker)).toBe(1);
+  } finally {
+    // Unconditional, idempotent sweep (deletes 0 on the success path): a conditional
+    // sweep skipped the cleanup exactly when the success-path delete itself failed
+    // mid-flight, leaking the marker row forever (review-workflow LOW, round 2). Then
+    // only VERIFY emptiness — never assert counts a failed try can't have produced.
+    deleteFeedbackByNote(marker);
+    expect(feedbackCountByNote(marker)).toBe(0);
+  }
+});
+
+test("3.5 — the worklist is ranked worst-health first, and the rows a judge reads ARE the API's (item 3.5)", async ({ page }) => {
+  interface Row { rank: number; health_score: number; asset_id: string }
+  const items = await apiJson<Row[]>("/api/worklist?limit=20");
   expect(items.length).toBeGreaterThan(0);
   const scores = items.map((i) => i.health_score);
   expect(scores).toEqual([...scores].sort((a, b) => a - b)); // ascending health = worst first
   expect(items.map((i) => i.rank)).toEqual(items.map((_, i) => i + 1)); // rank 1..n
+
   await page.goto("/predictive");
   await expect(page.getByTestId("worklist")).toBeVisible();
+
+  // First-three rendered↔API correspondence. Scores move as scoring cycles run, so the
+  // comparison samples BOTH sides until they agree within one quiet window — but each
+  // sample compares literally, so a reordering or value drift bug can never pass. THREE
+  // rows are REQUIRED on both sides: a truncated worklist must fail this proof, not
+  // satisfy it vacuously (g-check MEDIUM).
+  const rows = page.getByTestId("worklist").locator('[data-testid^="worklist-row-"]');
+  await pollUntil(
+    async () => {
+      const api = (await apiJson<Row[]>("/api/worklist?limit=3")).slice(0, 3);
+      if (api.length !== 3 || (await rows.count()) < 3) return false;
+      for (let i = 0; i < 3; i += 1) {
+        const row = rows.nth(i);
+        const [rank, asset, health, rankCell, assetButton, healthCell] = await Promise.all([
+          row.getAttribute("data-rank"),
+          row.getAttribute("data-asset"),
+          row.getAttribute("data-health-score"),
+          row.locator("td").first().innerText(),
+          row.getByRole("button").innerText(),
+          row.getByTestId("worklist-health-cell").innerText(),
+        ]);
+        // formatInt's half-away-from-zero rounding, replicated for the visible numeral.
+        const vInt = (v: number): string => {
+          const r = (v < 0 ? -1 : 1) * Math.floor(Math.abs(v) + 0.5);
+          return new Intl.NumberFormat("th-TH", { style: "decimal", useGrouping: true }).format(r);
+        };
+        if (
+          rank !== String(api[i].rank) ||
+          asset !== api[i].asset_id ||
+          health !== String(api[i].health_score) ||
+          // …and the JUDGE-VISIBLE cells, not only the metadata attributes: the rendered
+          // rank, asset label, AND health numeral must be the API's too (review-workflow
+          // MEDIUM: the WorklistRow→HealthMeter seam was otherwise unproven live).
+          rankCell.trim() !== String(api[i].rank) ||
+          assetButton.trim() !== api[i].asset_id ||
+          !healthCell.includes(vInt(api[i].health_score))
+        ) {
+          return false;
+        }
+      }
+      return true;
+    },
+    { timeoutMs: 30_000, label: "first three rendered worklist rows to match the API's" },
+  );
 });
 
 test("3.6 — Root Cause Analysis names ranked signals for the selected device (item 3.6)", async ({ page }) => {
@@ -146,6 +247,58 @@ test("3.6 — Root Cause Analysis names ranked signals for the selected device (
   expect(mags).toEqual([...mags].sort((a, b) => b - a)); // ranked, largest |contribution| first
   await page.goto("/predictive");
   await expect(page.getByTestId("rca-panel")).toBeVisible();
+});
+
+test("3.6b — two different induced anomalies produce two different TOP rendered causes (item 3.6)", async ({ page }) => {
+  // Model-LOCAL attribution is the claim: a worn-trajectory anomaly tops on vibration,
+  // while the hot-bearing anomaly (healthy baseline, bearing pinned above band) tops on
+  // bearing temperature. Global feature importance ranks identically for every window and
+  // cannot pass this. Both are allow-listed demo scenarios a judge can drive from the
+  // สาธิตเหตุการณ์ panel. (`pressure_drop` cannot serve as the second cause: every fault
+  // mode except bearing_anomaly rides the WORN trajectory, whose vibration dominates
+  // attribution regardless of the injected instant.)
+  interface Rca { contributions: { signal: string; contribution: number }[] }
+  const apiTop = async (): Promise<string | undefined> =>
+    (await apiJson<Rca>("/api/rca/P-2")).contributions[0]?.signal;
+
+  try {
+    await postScenario("anomaly", "P-2"); // worn trajectory + above-band vibration
+    await pollUntil(async () => (await apiTop()) === "vibration", {
+      timeoutMs: 35_000, label: "vibration to top the model's local attribution",
+    });
+    await page.goto("/predictive");
+    await page.getByRole("button", { name: "P-2" }).click();
+    const topBar = page.getByTestId("rca-panel").locator("[data-signal]").first();
+    await expect(topBar).toHaveAttribute("data-signal", "vibration");
+
+    await postScenario("bearing_anomaly", "P-2"); // healthy baseline, hot bearing
+    await pollUntil(async () => (await apiTop()) === "bearing_temp_c", {
+      timeoutMs: 35_000, label: "bearing temperature to top the model's local attribution",
+    });
+    // The named cause must come WITH a visible symptom: a hot-bearing device the
+    // worklist/twin still call normal would be an RCA claiming a fault on a healthy
+    // machine (review-workflow LOW).
+    const health = await apiJson<{ status: string }>("/api/health/P-2");
+    expect(["warning", "critical"]).toContain(health.status);
+    await page.reload();
+    await page.getByRole("button", { name: "P-2" }).click();
+    await expect(topBar).toHaveAttribute("data-signal", "bearing_temp_c");
+  } finally {
+    // Restore the suite's warm-state convention UNCONDITIONALLY (both review tiers): a
+    // mid-test failure must not leave the serialized shared stack off the documented
+    // pressure_drop end-state. Poll the MODE-SPECIFIC observable — the active run_id of
+    // the restore application — because "health degraded" was already true under both
+    // anomaly modes and could never verify pressure_drop specifically (review-workflow
+    // LOW, round 2).
+    const restored = await postScenario("pressure_drop", "P-2");
+    await pollUntil(
+      async () => {
+        const status = await apiJson<{ active_run_id: string | null }>("/api/demo/scenario");
+        return status.active_run_id === restored.run_id;
+      },
+      { timeoutMs: 15_000, label: "the pressure_drop restore to be the active scenario" },
+    );
+  }
 });
 
 test("GLOBAL — every simulated model value carries a visible SIMULATED marker", async ({ page }) => {

@@ -164,6 +164,32 @@ def test_preflight_verifies_served_artifact_provenance() -> None:
     ), "the mismatch verdict must set FAILED=1"
 
 
+def test_runbook_names_every_scenario_button_the_panel_renders() -> None:
+    """The runbook is the second operator's authoritative script: every mode button the
+    สาธิตเหตุการณ์ panel renders must appear in it, and the 3.6 row must walk the
+    two-anomaly top-cause sequence (g-check MEDIUM, PR-E round 2 — the panel gained a
+    button the runbook never mentioned)."""
+    panel = _read(REPO / "web" / "src" / "features" / "twin" / "DemoScenarioPanel.tsx")
+    runbook = _read(RUNBOOK)
+    labels = re.findall(r'label:\s*"([^"]+)"', panel)
+    assert len(labels) >= 5, "the scenario panel lost buttons — update this test's premise"
+    for label in labels:
+        assert label in runbook, f"runbook omits the panel button {label!r}"
+    row = re.search(r"^\| 3\.6 \(5\) \|.*$", runbook, re.M)
+    assert row is not None, "the runbook lost its 3.6 row"
+    # ORDERED: the operator sequence is anomaly → bearing → normal; a reordered script
+    # (e.g. reset before the second anomaly) would still contain all three labels, so
+    # membership alone cannot pin it (g-check MEDIUM, round 3).
+    sequence = ("จำลองอุปกรณ์เสื่อมสภาพ", "จำลองลูกปืนร้อนผิดปกติ", "คืนสู่สภาวะปกติ")
+    positions = [row.group(0).find(needle) for needle in sequence]
+    assert all(p >= 0 for p in positions), (
+        f"the 3.6 operator sequence omits {sequence[positions.index(-1)]!r}"
+    )
+    assert positions == sorted(positions), (
+        "the 3.6 operator sequence is out of order — it must read anomaly → bearing → normal"
+    )
+
+
 def test_preflight_is_not_called_cold_start() -> None:
     """`demo-preflight` preserves volumes; only `demo-down` produces a true cold start."""
     preflight = _read(PREFLIGHT)

@@ -77,10 +77,12 @@ class TwinEvent(BaseModel):
     value: float | None = None
 
 
-#: The demo director's vocabulary (P0 scenario API). Fault modes steer the target's
-#: feature window onto a worn trajectory; `normal` steers it healthy; `bad_asset`
-#: dead-letters one unknown-asset message.
-DemoMode = Literal["anomaly", "pressure_drop", "bad_asset", "normal"]
+#: The demo director's vocabulary (P0 scenario API). `anomaly`/`pressure_drop` steer the
+#: target's feature window onto a WORN trajectory; `bearing_anomaly` rides the HEALTHY
+#: trajectory with the bearing pinned above band (its one deviating signal IS the cause —
+#: PR-E, item 3.6 discrimination); `normal` steers healthy; `bad_asset` dead-letters one
+#: unknown-asset message.
+DemoMode = Literal["anomaly", "pressure_drop", "bad_asset", "normal", "bearing_anomaly"]
 
 
 class DemoScenarioRequest(BaseModel):

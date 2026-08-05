@@ -149,3 +149,29 @@ def test_training_does_not_read_the_validation_or_demo_lifecycles(tmp_path: Path
             f"the {name} pipeline's coefficients changed when only VALIDATION and DEMO "
             "rows were perturbed — those lifecycles are reaching the fit"
         )
+
+
+def test_rca_reverses_through_the_SHIPPED_artifact() -> None:
+    """Item 3.6 via the artifact that actually serves (PR-E): local attribution must change
+    its top signal when a different signal misbehaves — through `ml/artifacts/model.pkl`
+    itself, not a freshly trained stand-in. A global-importance implementation ranks the
+    same way for every window and cannot pass this."""
+    from pwa_ml.lifecycle import LifecycleRow, generate_lifecycle
+
+    bundle = load_bundle(_require_artifact())
+    run = generate_lifecycle(
+        lifecycle_id="lc-shipped-rca", seed=23, hours=200, wear_rate=0.15,
+        failure_threshold=30.0,
+    )
+    base = list(run.rows[:24])
+
+    def driven(field: str, amount: float) -> list[LifecycleRow]:
+        return [dataclasses.replace(r, **{field: getattr(r, field) + amount}) for r in base]
+
+    vibration_top = score_window(bundle, driven("vibration", 6.0))
+    pressure_top = score_window(bundle, driven("pressure_bar", -1.5))
+
+    assert vibration_top.contributions and pressure_top.contributions
+    assert vibration_top.contributions[0].signal == "vibration"
+    assert pressure_top.contributions[0].signal == "pressure_bar"
+    assert vibration_top.contributions[0].signal != pressure_top.contributions[0].signal

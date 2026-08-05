@@ -83,6 +83,30 @@ describe("WorklistTable", () => {
     fireEvent.click(screen.getByRole("button", { name: "P-7" }));
     expect(onSelect).toHaveBeenCalledWith("P-7");
   });
+
+  it("exposes exact served values on each row for literal DOM↔API comparison (item 3.5)", () => {
+    const items = [
+      wItem({ asset_id: "P-2", rank: 1, health_score: 30.4 }),
+      wItem({ asset_id: "P-7", rank: 2, health_score: 61.9, status: "warning" }),
+    ];
+    render(<WorklistTable items={items} selected={null} onSelect={vi.fn()} />);
+    const first = screen.getByTestId("worklist-row-P-2");
+    expect(first).toHaveAttribute("data-rank", "1");
+    expect(first).toHaveAttribute("data-asset", "P-2");
+    expect(first).toHaveAttribute("data-health-score", "30.4");
+    const second = screen.getByTestId("worklist-row-P-7");
+    expect(second).toHaveAttribute("data-rank", "2");
+    expect(second).toHaveAttribute("data-health-score", "61.9");
+    // The judge-visible numeral inside the row IS the formatted served score: 30.4 →
+    // formatInt half-away-from-zero → "30" (the WorklistRow→HealthMeter seam the E2E
+    // relies on; review-workflow MEDIUM).
+    expect(
+      within(within(first).getByTestId("worklist-health-cell")).getByText("30"),
+    ).toBeInTheDocument();
+    expect(
+      within(within(second).getByTestId("worklist-health-cell")).getByText("62"),
+    ).toBeInTheDocument();
+  });
 });
 
 describe("RcaPanel", () => {
@@ -99,6 +123,17 @@ describe("RcaPanel", () => {
     expect(within(screen.getByTestId("rca-panel")).getByText("SIMULATED")).toBeInTheDocument();
     rerender(<RcaPanel asset={null} rca={null} />);
     expect(screen.getByText(/เลือกอุปกรณ์/)).toBeInTheDocument();
+  });
+
+  it("identifies each ranked bar machine-readably so the top cause is provable (item 3.6)", () => {
+    const rca: RcaResponse = {
+      asset_id: "P-2", model_version: "v1", observed_at: null, simulated: true, detail: null,
+      contributions: [{ signal: "vibration", contribution: 0.34 }, { signal: "pressure_bar", contribution: -0.12 }],
+    };
+    render(<RcaPanel asset="P-2" rca={rca} />);
+    const bars = within(screen.getByTestId("rca-panel")).getAllByRole("listitem");
+    // Ranked order AND identity: the first bar IS the top attributed signal.
+    expect(bars.map((b) => b.getAttribute("data-signal"))).toEqual(["vibration", "pressure_bar"]);
   });
 });
 

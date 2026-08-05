@@ -22,8 +22,9 @@ from pwa_ml.lifecycle import generate_lifecycle
 from pwa_ml.predict import CRITICAL_BELOW, WARNING_BELOW, load_bundle, score_window
 
 from app import demo
+from app.bands import SIGNAL_BANDS
 from app.features import WINDOW_HOURS, build_window
-from app.models import Reading, Signal
+from app.models import DemoMode, Reading
 
 # ── solver ─────────────────────────────────────────────────────────────────────────────
 
@@ -70,25 +71,68 @@ def test_solver_folds_a_reserved_reading_into_the_bucket_mean() -> None:
     assert blended == pytest.approx(target, abs=1e-9)
 
 
-def test_solved_rows_leave_the_instant_buckets_mean_on_trajectory() -> None:
+@pytest.mark.parametrize("mode", ["normal", "pressure_drop", "anomaly", "bearing_anomaly"])
+def test_solved_rows_leave_every_instant_buckets_mean_on_trajectory(mode: DemoMode) -> None:
+    """EXACTLY the five instants `_replace_scenario` reserves, built by the production
+    `_scenario_instants` — a hand-rolled three-entry fixture let a dropped vibration or
+    bearing reservation drift the feature bucket unnoticed (g-check MEDIUM, round 2)."""
     now = datetime(2026, 8, 3, 12, 30, 0, tzinfo=UTC)
-    signal, value = demo.instant_reading("pressure_drop")
-    targets = {(hb, s): v for hb, s, v in demo.trajectory("P-2", demo.WORN_WEAR)}
-    # The band excursion plus the fresh SEC pair (item 2.3) — one instant per signal,
-    # exactly what _replace_scenario reserves.
-    instants: dict[Signal, float] = {
-        signal: value,
-        "power_kw": round(targets[(0, "power_kw")], 4),
-        "flow_m3h": round(targets[(0, "flow_m3h")], 4),
-    }
+    wear = demo.HEALTHY_WEAR if mode in ("normal", "bearing_anomaly") else demo.WORN_WEAR
+    targets = {(hb, s): v for hb, s, v in demo.scenario_trajectory(mode, "P-2", wear)}
+    instants = demo._scenario_instants(mode, "P-2", wear)
+
+    # Primary-first and complete: one instant per signal, band transition leading.
+    assert list(instants)[0] == demo.instant_reading(mode)[0]
+    assert set(instants) == {"pressure_bar", "vibration", "bearing_temp_c", "power_kw", "flow_m3h"}
+
     rows = demo._solved_rows(
-        {}, target="P-2", wear=demo.WORN_WEAR, now=now, run_id="r", instants=instants
+        {}, mode=mode, target="P-2", wear=wear, now=now, run_id="r",
+        instants=instants,
     )
     bucket = now.replace(minute=0, second=0, microsecond=0)
     for inst_signal, inst_value in instants.items():
         in_bucket = [r.value for r in rows if r.signal == inst_signal and r.ts >= bucket]
         final_mean = (sum(in_bucket) + inst_value) / (len(in_bucket) + 1)
         assert final_mean == pytest.approx(targets[(0, inst_signal)], abs=1e-3), inst_signal
+
+
+def test_solved_rows_stay_inside_the_plausible_envelope_for_the_bearing_pin() -> None:
+    """The hotter bearing pin (one band-width above high) must be reachable with plausible
+    injected values on a realistically-full warm bucket (g-check MEDIUM: the reviewer's
+    own realistic case, n=15 readings averaging 55 °C with the 85 °C instant reserved)."""
+    now = datetime(2026, 8, 5, 12, 30, tzinfo=UTC)
+    bucket = now.replace(minute=0, second=0, microsecond=0)
+    stats: dict[tuple[datetime, str], tuple[int, float | None]] = {
+        (bucket, "bearing_temp_c"): (15, 55.0)
+    }
+
+    rows = demo._solved_rows(
+        stats, mode="bearing_anomaly", target="P-2", wear=demo.HEALTHY_WEAR, now=now,
+        run_id="r", instants={"bearing_temp_c": 85.0},
+    )
+
+    low, high = SIGNAL_BANDS["bearing_temp_c"]
+    margin = demo._PLAUSIBLE_BAND_WIDTHS * (high - low)
+    hot_rows = [r.value for r in rows if r.signal == "bearing_temp_c" and r.ts >= bucket]
+    assert hot_rows, "the pinned bucket must receive injected rows"
+    assert all(low - margin <= v <= high + margin for v in hot_rows)
+
+
+def test_solved_rows_fail_closed_rather_than_write_implausible_values() -> None:
+    """A pathologically full bucket makes the capped solve compensate with huge values
+    (2 600 °C bearings). The injection must REFUSE — aborting the whole replacement —
+    never write them (g-check MEDIUM, fail-closed)."""
+    now = datetime(2026, 8, 5, 12, 30, tzinfo=UTC)
+    bucket = now.replace(minute=0, second=0, microsecond=0)
+    stats: dict[tuple[datetime, str], tuple[int, float | None]] = {
+        (bucket, "bearing_temp_c"): (10_000, 55.0)
+    }
+
+    with pytest.raises(demo.ScenarioImplausible):
+        demo._solved_rows(
+            stats, mode="bearing_anomaly", target="P-2", wear=demo.HEALTHY_WEAR, now=now,
+            run_id="r", instants={"bearing_temp_c": 85.0},
+        )
 
 
 # ── trajectories through the shipped model (the item-3.3 oracle) ───────────────────────

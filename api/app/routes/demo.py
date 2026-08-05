@@ -9,7 +9,8 @@ content-free when disabled — it exists so the UI can decide whether to show th
 at all, and to report the active run_id for traceability.
 
 `async def` on purpose, unlike the twin's read routes: the handler must broadcast the
-instant `TwinEvent` on the EVENT LOOP (`TwinHub` is not thread-safe — see `app.ws`),
+instant `TwinEvent`s — one per signal, so a replacement supersedes the twin's complete
+per-signal state — on the EVENT LOOP (`TwinHub` is not thread-safe — see `app.ws`),
 while the database work runs in a worker via `asyncio.to_thread`. Same split as
 `scoring.run_scoring_loop`.
 """
@@ -22,7 +23,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, HTTPException, Request
 from psycopg_pool import ConnectionPool
 
-from ..demo import ScenarioConflict, apply_scenario, target_kind
+from ..demo import ScenarioConflict, ScenarioImplausible, apply_scenario, target_kind
 from ..models import DemoScenarioRequest, DemoScenarioResponse, DemoStatusResponse
 
 router = APIRouter(tags=["demo"])
@@ -66,13 +67,15 @@ async def _require_pump_target(pool: ConnectionPool, target: str) -> None:
     summary="Apply a targeted demo scenario (DEMO_CONTROLS=1 only)",
 )
 async def demo_scenario(request: Request, body: DemoScenarioRequest) -> DemoScenarioResponse:
-    """Inject the scenario now and broadcast its instant frame.
+    """Inject the scenario now and broadcast its instant frames (one per signal).
 
     Raises:
         HTTPException: 403 when demo controls are off; 503 without a database; 404 for a
             target not on the roster; 422 for a target that is not a pump (only pumps
-            report all five signals, so only a pump's window is scoreable); 409 when a
-            concurrent application already holds the target's scenario lock.
+            report all five signals, so only a pump's window is scoreable) or when the
+            solve would require physically implausible injected values (fail-closed —
+            the previous scenario stays intact); 409 when a concurrent application
+            already holds the target's scenario lock.
     """
     if not _demo_enabled(request):
         raise HTTPException(status_code=403, detail="demo controls disabled; set DEMO_CONTROLS=1")
@@ -95,6 +98,10 @@ async def demo_scenario(request: Request, body: DemoScenarioRequest) -> DemoScen
         )
     except ScenarioConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ScenarioImplausible as exc:
+        # Fail closed, visibly: the transaction already rolled back, the previous scenario
+        # is intact, and the operator learns WHY instead of getting implausible telemetry.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # On the loop, after the thread returned — never from inside it (app.ws contract).
     hub = getattr(request.app.state, "twin_hub", None)

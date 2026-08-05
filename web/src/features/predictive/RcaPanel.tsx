@@ -33,7 +33,14 @@ export function RcaPanel({ asset, rca }: RcaPanelProps): JSX.Element {
       ) : (
         <ul className="flex flex-col gap-3" aria-label="ปัจจัยที่มีผลต่อสุขภาพอุปกรณ์">
           {bars.map((bar) => (
-            <li key={bar.signal} className="grid grid-cols-[9rem_1fr_3.5rem] items-center gap-3">
+            // data-signal: the machine-readable identity of each ranked bar, so the E2E
+            // can prove the TOP rendered cause tracks the model's local attribution and
+            // CHANGES between two different induced anomalies (PR-E, item 3.6).
+            <li
+              key={bar.signal}
+              data-signal={bar.signal}
+              className="grid grid-cols-[9rem_1fr_3.5rem] items-center gap-3"
+            >
               <span className="truncate text-dense text-on-surface-variant">
                 {SIGNAL_LABEL_TH[bar.signal]}
               </span>

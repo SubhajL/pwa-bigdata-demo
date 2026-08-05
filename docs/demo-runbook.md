@@ -30,8 +30,10 @@ a minute to become visible. The **demo-scenario API** injects it for **P-2 on co
 instead — from the twin screen or curl — and the transitions land in seconds:
 
 * On **ศูนย์ควบคุม SCADA** (`/operations`), the **สาธิตเหตุการณ์** card (SIMULATED-badged,
-  right column) has four buttons: **จำลองแรงดันตก** (pressure drop → items 2.2/2.3/2.4/3.3
-  from one click), **จำลองอุปกรณ์เสื่อมสภาพ** (vibration anomaly), **จำลองข้อมูลเสีย (DLQ)**
+  right column) has five buttons: **จำลองแรงดันตก** (pressure drop → items 2.2/2.3/2.4/3.3
+  from one click), **จำลองอุปกรณ์เสื่อมสภาพ** (vibration anomaly),
+  **จำลองลูกปืนร้อนผิดปกติ** (hot-bearing anomaly on a healthy baseline — the SECOND induced
+  cause item 3.6's root-cause variation is proven with), **จำลองข้อมูลเสีย (DLQ)**
   (a direct demo DLQ insert — a fast visual, **not** the scored item-1.5 proof; see the
   honesty note below), **คืนสู่สภาวะปกติ** (recovery). The card shows the active **run_id**;
   every injected row in the database carries it (`source='DEMO'` for telemetry scenarios,
@@ -119,7 +121,7 @@ ordered rows.
 | 3.3 (5) | — | a device's health status ↔ its twin symbol | the twin reflects the model's health (bound ≤ 30s, measured in `api/tests/test_scoring_cycle.py`) | — |
 | 3.4 (5) | Swagger `/docs` → `POST /api/feedback` → **Try it out**, or the on-screen form → **ส่งผลการตรวจสอบ** | the ack | **200** with `stored: true` + an `id` (proof it persisted) | — |
 | 3.5 (5) | — | Health & PTTF worklist | ranked worst-health first, rank 1..n | — |
-| 3.6 (5) | click a worklist device | Root-Cause bars | named signals, largest \|contribution\| first | — |
+| 3.6 (5) | **จำลองอุปกรณ์เสื่อมสภาพ**, click P-2 on the worklist, then **จำลองลูกปืนร้อนผิดปกติ** and re-select | Root-Cause bars | named signals, largest \|contribution\| first — and the TOP cause follows the induced fault: Vibration under the vibration anomaly, Bearing temperature under the hot-bearing anomaly | **คืนสู่สภาวะปกติ** |
 
 ---
 

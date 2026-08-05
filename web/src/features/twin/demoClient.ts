@@ -7,7 +7,7 @@
  */
 import { getJson } from "@/api/client";
 
-export type DemoMode = "anomaly" | "pressure_drop" | "bad_asset" | "normal";
+export type DemoMode = "anomaly" | "pressure_drop" | "bad_asset" | "normal" | "bearing_anomaly";
 
 export interface DemoStatus {
   readonly enabled: boolean;

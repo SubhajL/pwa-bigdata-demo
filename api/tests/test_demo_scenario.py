@@ -92,6 +92,17 @@ def _window_health(pool: ConnectionPool, artifact: pathlib.Path, asset: str) -> 
     return score_window(load_bundle(artifact), window.rows).health
 
 
+def _window_top_signal(pool: ConnectionPool, artifact: pathlib.Path, asset: str) -> str:
+    """The top RCA contribution for the asset's CURRENT window — what /api/rca serves."""
+    now = datetime.now(tz=UTC)
+    readings = query_range(pool, asset, now - timedelta(hours=WINDOW_HOURS), now)
+    window = build_window(readings, now=now, hours=WINDOW_HOURS)
+    assert window.scoreable, f"window not scoreable after injection: {window.reason}"
+    score = score_window(load_bundle(artifact), window.rows)
+    assert score.contributions, "no contributions for a scoreable window"
+    return score.contributions[0].signal
+
+
 # ── the gate ───────────────────────────────────────────────────────────────────────────
 
 
@@ -126,6 +137,26 @@ def test_non_pump_target_is_422(client: TestClient) -> None:
 def test_the_route_is_documented_in_swagger(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
     assert "/api/demo/scenario" in spec["paths"]
+
+
+def test_an_implausible_solve_maps_to_422_not_500(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fail-closed `ScenarioImplausible` guard must surface as a 422 the operator can
+    read — a refactor collapsing the except clauses would turn it into a 500 mid-demo,
+    and no test executed the mapping (review-workflow MEDIUM, coverage-proven)."""
+    from app import demo as demo_module
+    from app.routes import demo as demo_route
+
+    def refuse(*args: object, **kwargs: object) -> object:
+        raise demo_module.ScenarioImplausible("bucket too full; refusing implausible values")
+
+    monkeypatch.setattr(demo_route, "apply_scenario", refuse)
+    response = client.post(
+        "/api/demo/scenario", json={"mode": "bearing_anomaly", "target": PUMP}
+    )
+    assert response.status_code == 422
+    assert "implausible" in response.json()["detail"]
 
 
 # ── injection ──────────────────────────────────────────────────────────────────────────
@@ -211,12 +242,18 @@ def test_pressure_drop_broadcasts_an_instant_below_band_warning(
         "/api/demo/scenario", json={"mode": "pressure_drop", "target": PUMP}
     )
     assert response.status_code == 200
-    assert len(events) == 1
+    # A replacement supersedes the twin's COMPLETE per-signal state — one frame per
+    # signal, the primary band transition FIRST (g-check HIGH: a partial broadcast let a
+    # prior mode's warning survive recovery on an open page).
+    assert len(events) == 5
     frame = events[0]
     assert frame.kind == "status"
     assert frame.asset_id == PUMP
     assert frame.status == "warning"
     assert frame.signal == "pressure_bar"
+    assert {e.signal for e in events} == {
+        "pressure_bar", "vibration", "bearing_temp_c", "power_kw", "flow_m3h",
+    }
     assert frame.value is not None and frame.value < SIGNAL_BANDS["pressure_bar"][0]
 
 
@@ -229,6 +266,75 @@ def test_injected_window_scores_critical_through_the_shipped_model(
     assert response.status_code == 200
     health = _window_health(pool, model_artifact, PUMP)
     assert health < CRITICAL_BELOW, f"injected window scored {health:.1f}"
+
+
+def test_bearing_anomaly_gives_a_DIFFERENT_top_cause_than_anomaly(
+    client: TestClient, pool: ConnectionPool, model_artifact: pathlib.Path
+) -> None:
+    """Item 3.6's browser proof needs two allow-listed scenarios whose TOP rendered causes
+    differ. `anomaly` and `pressure_drop` both ride the WORN trajectory, whose vibration
+    dominates attribution no matter which instant is injected — so `bearing_anomaly` rides
+    the HEALTHY trajectory with every `bearing_temp_c` bucket pinned above band: the
+    deviating signal IS the cause, the exact counterfactual shape
+    `ml/tests/test_model.py::test_rca_REVERSES_between_two_different_anomalies` proves the
+    model discriminates on."""
+    vib = client.post("/api/demo/scenario", json={"mode": "anomaly", "target": PUMP})
+    assert vib.status_code == 200
+    assert _window_top_signal(pool, model_artifact, PUMP) == "vibration"
+
+    bearing = client.post(
+        "/api/demo/scenario", json={"mode": "bearing_anomaly", "target": PUMP}
+    )
+    assert bearing.status_code == 200
+    assert bearing.json()["injected_readings"] > 0
+    assert _window_top_signal(pool, model_artifact, PUMP) == "bearing_temp_c"
+    # The cause a judge reads must come WITH a visible symptom: pin the health degrade in
+    # the SAME test that names discrimination, so relaxing the sibling health test can
+    # never silently orphan the trajectory pin (review-workflow MEDIUM, mutation-proven).
+    assert _window_health(pool, model_artifact, PUMP) < WARNING_BELOW
+
+
+def test_bearing_anomaly_still_degrades_health_out_of_normal(
+    client: TestClient, pool: ConnectionPool, model_artifact: pathlib.Path
+) -> None:
+    """A cause a judge can SEE needs a symptom a judge can see: the healthy-trajectory
+    bearing anomaly must still pull health below the normal band, or the worklist/twin
+    would show a 'normal' device whose RCA claims a fault."""
+    response = client.post(
+        "/api/demo/scenario", json={"mode": "bearing_anomaly", "target": PUMP}
+    )
+    assert response.status_code == 200
+    health = _window_health(pool, model_artifact, PUMP)
+    assert health < WARNING_BELOW, f"bearing-anomaly window scored {health:.1f} — still normal"
+
+
+def test_every_replacement_supersedes_all_five_per_signal_states(
+    client: TestClient, pool: ConnectionPool, model_artifact: pathlib.Path
+) -> None:
+    """The twin keeps independent per-signal states and renders their MAX severity, and a
+    state persists until a NEWER frame for the SAME signal (g-check HIGH): after
+    `bearing_anomaly`, a `normal` application must broadcast an IN-BAND bearing frame —
+    and one frame per signal — or the stale bearing warning survives recovery forever on
+    an open page."""
+    from app.demo import apply_scenario
+    from app.ingest import SIGNALS
+
+    bearing = client.post(
+        "/api/demo/scenario", json={"mode": "bearing_anomaly", "target": PUMP}
+    )
+    assert bearing.status_code == 200
+
+    result = apply_scenario(
+        pool, mode="normal", target=PUMP, now=datetime.now(tz=UTC), run_id="test-recovery"
+    )
+    by_signal = {e.signal: e for e in result.events if e.signal is not None}
+    assert set(by_signal) == set(SIGNALS.values()), (
+        f"normal must supersede EVERY signal state; got only {sorted(map(str, by_signal))}"
+    )
+    # ALL five recovery frames classify in-band — pinning only the bearing would let a
+    # different signal's stale warning survive the same way (review-workflow LOW).
+    off_band = {s: e.status for s, e in by_signal.items() if e.status != "normal"}
+    assert not off_band, f"normal recovery frames classified out of band: {off_band}"
 
 
 def test_normal_removes_demo_pairs_and_scores_healthy(

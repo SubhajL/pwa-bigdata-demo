@@ -89,6 +89,8 @@ describe("enabled panel", () => {
     expect(screen.getByText("SIMULATED")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /จำลองแรงดันตก/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /จำลองอุปกรณ์เสื่อมสภาพ/ })).toBeInTheDocument();
+    // The second, differently-caused anomaly (PR-E, item 3.6 discrimination).
+    expect(screen.getByRole("button", { name: /จำลองลูกปืนร้อนผิดปกติ/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /จำลองข้อมูลเสีย/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /คืนสู่สภาวะปกติ/ })).toBeInTheDocument();
     expect(screen.getByTestId("demo-run-id")).toHaveTextContent("demo-anomaly-11aa22bb");
@@ -108,6 +110,19 @@ describe("enabled panel", () => {
     const post = captured.find((c) => c.method === "POST");
     expect(post?.url).toContain("/api/demo/scenario");
     expect(post?.body).toEqual({ mode: "pressure_drop", target: "P-2" });
+  });
+
+  it("POSTs bearing_anomaly for the hot-bearing button (item 3.6 discrimination)", async () => {
+    const captured: Captured[] = [];
+    stubDemoFetch({ status: { enabled: true }, captured });
+    render(<DemoScenarioPanel />);
+    await screen.findByTestId("demo-scenario-panel");
+
+    fireEvent.click(screen.getByRole("button", { name: /จำลองลูกปืนร้อนผิดปกติ/ }));
+
+    await waitFor(() => expect(captured.some((c) => c.method === "POST")).toBe(true));
+    const post = captured.find((c) => c.method === "POST");
+    expect(post?.body).toEqual({ mode: "bearing_anomaly", target: "P-2" });
   });
 
   it("surfaces a Thai error when the injection fails, and recovers the buttons", async () => {
