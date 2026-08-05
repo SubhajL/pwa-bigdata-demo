@@ -70,6 +70,11 @@ function WorklistRow({
     <tr
       data-testid={`worklist-row-${item.asset_id}`}
       data-selected={selected}
+      // The exact served values, untouched by display formatting: the E2E compares the
+      // first three RENDERED rows to /api/worklist string-for-string (PR-E, item 3.5).
+      data-rank={item.rank}
+      data-asset={item.asset_id}
+      data-health-score={item.health_score}
       className={cn("border-b border-outline-variant", selected && "bg-surface-container")}
     >
       <td className="px-3 py-2 tabular text-on-surface-variant">{item.rank}</td>
@@ -84,7 +89,10 @@ function WorklistRow({
         </button>
       </td>
       <td className="px-3 py-2 text-on-surface-variant">{item.branch ?? "—"}</td>
-      <td className="px-3 py-2">
+      {/* The testid marks the JUDGE-VISIBLE health numeral (the meter's rendered int),
+          so the E2E can tie what a judge reads to the API value — the data-health-score
+          attribute alone never proved the rendered digit (review-workflow MEDIUM). */}
+      <td className="px-3 py-2" data-testid="worklist-health-cell">
         <HealthMeter value={item.health_score} status={item.status} />
       </td>
       <td className="px-3 py-2 text-right tabular text-on-surface">

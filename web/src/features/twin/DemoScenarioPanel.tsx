@@ -14,6 +14,9 @@ export interface DemoScenarioPanelProps {
 const SCENARIOS: ReadonlyArray<{ mode: DemoMode; label: string }> = [
   { mode: "pressure_drop", label: "จำลองแรงดันตก" },
   { mode: "anomaly", label: "จำลองอุปกรณ์เสื่อมสภาพ" },
+  // A SECOND, differently-caused anomaly (hot bearing on a healthy baseline), so RCA can
+  // show a judge the top cause CHANGING with the induced fault (PR-E, item 3.6).
+  { mode: "bearing_anomaly", label: "จำลองลูกปืนร้อนผิดปกติ" },
   { mode: "bad_asset", label: "จำลองข้อมูลเสีย (DLQ)" },
   { mode: "normal", label: "คืนสู่สภาวะปกติ" },
 ];

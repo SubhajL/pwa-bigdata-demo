@@ -3,7 +3,7 @@
  * and a poll-until. The scenario controls shell out to Docker, so a spec never fakes state — it
  * drives the same mechanism a judge would.
  */
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 export const API_BASE = process.env.API_BASE ?? "http://localhost:8000";
@@ -62,7 +62,7 @@ export function setFault(mode: FaultMode): void {
 
 // ── P0 demo-scenario API (the deterministic director; no docker round-trip) ──────────────
 
-export type DemoMode = "anomaly" | "pressure_drop" | "bad_asset" | "normal";
+export type DemoMode = "anomaly" | "pressure_drop" | "bad_asset" | "normal" | "bearing_anomaly";
 
 export interface DemoScenarioResult {
   run_id: string;
@@ -132,6 +132,58 @@ export async function pollUntil(
     if (Date.now() - start >= timeoutMs) throw new Error(`timed out waiting for ${label} (${timeoutMs}ms)`);
     await new Promise((r) => setTimeout(r, intervalMs));
   }
+}
+
+// ── item 3.4: bounded feedback verification (PR-E) ───────────────────────────────────────
+//
+// There is deliberately no GET /api/feedback, so persistence is verified the way an
+// operator's DBA would: a bounded, read-only count in the database, keyed on the marker
+// note the test itself submitted. The cleanup deletes ONLY rows carrying that marker —
+// the harness removes exactly the test feedback it persisted, nothing else.
+//
+// Injection surface (both review tiers): markers cross a shell AND a SQL boundary, so the
+// command is argv-based (no shell string) and the marker must match a strict grammar
+// BEFORE it is spliced into the SQL literal — a marker with a quote, backtick, or space
+// is a harness bug and fails loudly here rather than broadening a DELETE.
+
+const MARKER_GRAMMAR = /^[a-z0-9][a-z0-9-]{0,80}$/;
+
+function feedbackSql(sql: string): string {
+  return execFileSync(
+    "docker",
+    ["compose", "-f", COMPOSE, "exec", "-T", "timescaledb",
+     "timeout", "8", "psql", "-U", "pwa", "-d", "pwa", "-tA", "-c", sql],
+    { encoding: "utf8" },
+  ).trim();
+}
+
+function assertMarker(note: string): void {
+  if (!MARKER_GRAMMAR.test(note)) {
+    throw new Error(`feedback marker ${JSON.stringify(note)} violates the harness grammar`);
+  }
+}
+
+/** Rows in `feedback` whose note equals the marker (exact match, bounded probe). */
+export function feedbackCountByNote(note: string): number {
+  assertMarker(note);
+  return Number(feedbackSql(`SELECT count(*) FROM feedback WHERE note = '${note}'`));
+}
+
+/** The persisted row's id for the marker note (or null) — proves the ack id IS a DB row. */
+export function feedbackIdByNote(note: string): number | null {
+  assertMarker(note);
+  const out = feedbackSql(`SELECT id FROM feedback WHERE note = '${note}' ORDER BY id DESC LIMIT 1`);
+  return out === "" ? null : Number(out);
+}
+
+/** Delete the harness's own persisted test feedback; returns the rows removed. */
+export function deleteFeedbackByNote(note: string): number {
+  assertMarker(note);
+  return Number(
+    feedbackSql(
+      `WITH d AS (DELETE FROM feedback WHERE note = '${note}' RETURNING 1) SELECT count(*) FROM d`,
+    ),
+  );
 }
 
 /** Parse the `db;dur=<ms>` metric out of a Server-Timing header value (item 1.3). */

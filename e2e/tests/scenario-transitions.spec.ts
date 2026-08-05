@@ -269,6 +269,27 @@ test("P0 — bad_asset dead-letters exactly one message and ingest keeps flowing
   );
 });
 
+test("P1 — a hot-bearing warning clears on the SAME loaded twin when normal is applied from the panel", async ({ page }) => {
+  // g-check HIGH (PR-E): the twin renders the MAX severity across per-signal states, and
+  // a state persists until a NEWER frame for the SAME signal — so recovery is only real
+  // if `normal` supersedes the bearing frame too, on the open page, no reload. Driven
+  // through the judge-facing panel buttons, so the new mode's browser path is the proof.
+  await openTwin(page);
+  await resetToNormal(page);
+  const panel = page.getByTestId("demo-scenario-panel");
+  await expect(panel).toBeVisible();
+
+  await page.getByRole("button", { name: "จำลองลูกปืนร้อนผิดปกติ" }).click();
+  await expect(page.getByTestId("demo-run-id")).toHaveText(/demo-bearing_anomaly-/, { timeout: 10_000 });
+  await expect.poll(() => p2Dom(page), { timeout: 10_000 }).not.toBe("normal");
+
+  await page.getByRole("button", { name: "คืนสู่สภาวะปกติ" }).click();
+  // The stale-bearing trap: without a newer in-band bearing frame this stays warning
+  // forever, however healthy the model scores the recovered window.
+  await expect.poll(() => p2Dom(page), { timeout: 30_000 }).toBe("normal");
+  await assertNotReloaded(page);
+});
+
 test("P0 — the on-screen สาธิตเหตุการณ์ control drives the same injection, traceably", async ({ page }) => {
   await openTwin(page);
   await resetToNormal(page);

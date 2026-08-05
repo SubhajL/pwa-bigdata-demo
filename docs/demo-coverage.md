@@ -9,19 +9,20 @@ Honest status of the scored 100-point demo. Read with `POC_SPEC.md` §4A (the ru
 
 **Status legend:** ✅ done · ◑ partial · ❌ not yet.
 
-**Refreshed 2026-08-05 with PR-D.** The three demo topics are on screen (topic ๒ = PR-7,
+**Refreshed 2026-08-05 with PR-D/PR-E.** The three demo topics are on screen (topic ๒ = PR-7,
 topic ๑ = PR-8, topic ๓ = PR-9), and all 16 scored items have implementation paths connected to
-their runtime entry points: **16/16 built and wired**. The current warm Playwright suite (24 specs
+their runtime entry points: **16/16 built and wired**. The current warm Playwright suite (27 specs
 including the demo-director transitions) protects the strongest live paths, including the timed
-band `warning` → model `critical` → recovery sequence. It does not yet provide every literal
-operator/DOM oracle required for full acceptance.
+band `warning` → model `critical` → recovery sequence and the literal operator/DOM oracles for
+topic ๓; their exact-merged-SHA acceptance remains Gate A1's.
 
 **Gate A1 pending.** PR-D delivers the loaded-model artifact SHA and displayed dataset-value
 oracles for 3.1–3.2 (API/UI/preflight share one hash of the exact loaded bytes; tiles expose both
 the literal served values and the judge-visible numbers); their exact-SHA acceptance run remains
-Gate A1's. PR-E still owns Swagger Try-it-out persistence, DOM/API worklist correspondence, and
-induced rendered RCA variation for 3.4–3.6. Until those land and Gate A1 runs at one exact merged
-SHA, this matrix must not be promoted to a complete E2E-readiness claim.
+Gate A1's. PR-E delivers Swagger Try-it-out persistence (with DB-side verification and harness
+cleanup), first-three DOM/API worklist correspondence, and induced rendered RCA variation for
+3.4–3.6. Until Gate A1 runs at one exact merged SHA, this matrix must not be promoted to a
+complete E2E-readiness claim.
 
 ---
 
@@ -42,14 +43,15 @@ SHA, this matrix must not be promoted to a complete E2E-readiness claim.
 | 3.1 | Trained model file + algorithm + params (5) | ◑ built/wired; loaded-artifact SHA oracle delivered (PR-D); exact-SHA acceptance pending Gate A1 | PR-4, `/api/model` PR-9 | `topic3 3.1` + `3.1b` |
 | 3.2 | Health/PTTF vary across ≥2 datasets (5) | ◑ built/wired; displayed dataset-value oracle delivered (PR-D); exact-SHA acceptance pending Gate A1 | PR-4, `/api/model` PR-9 | `topic3 3.2` (DOM↔API literal + visible) |
 | 3.3 | Health<threshold → twin change ≤30s (5) | ✅ bound in `test_scoring_cycle`; browser-observed in `scenario-transitions` | PR-4/PR-5/PR-7, #30 | `topic3 3.3` |
-| 3.4 | Feedback API via Swagger, persists (5) | ◑ built/wired; literal Swagger Try-it-out pending PR-E | PR-5, screen PR-9 | `topic3 3.4` (custom-form oracle) |
-| 3.5 | Prioritized Worklist (5) | ◑ built/wired; rendered DOM/API row correspondence pending PR-E | PR-5, screen PR-9 | `topic3 3.5` (partial oracle) |
-| 3.6 | Root Cause Analysis (5) | ◑ built/wired; induced rendered cause variation pending PR-E | PR-4/PR-5, screen PR-9 | `topic3 3.6` (partial oracle) |
+| 3.4 | Feedback API via Swagger, persists (5) | ◑ built/wired; literal Swagger Try-it-out + DB persistence oracle delivered (PR-E); exact-SHA acceptance pending Gate A1 | PR-5, screen PR-9 | `topic3 3.4` + `3.4b` (Swagger↔DB row identity) |
+| 3.5 | Prioritized Worklist (5) | ◑ built/wired; first-three rendered↔API row oracle delivered (PR-E); exact-SHA acceptance pending Gate A1 | PR-5, screen PR-9 | `topic3 3.5` (first-three rendered↔API, visible cells) |
+| 3.6 | Root Cause Analysis (5) | ◑ built/wired; induced rendered-cause variation oracle delivered (PR-E); exact-SHA acceptance pending Gate A1 | PR-4/PR-5, screen PR-9 | `topic3 3.6` + `3.6b` (induced top-cause change) |
 
-**Implementation coverage: 16/16 built and wired.** Current automated evidence is 24 Playwright
+**Implementation coverage: 16/16 built and wired.** Current automated evidence is 27 Playwright
 specs, including a global SIMULATED-marker check and the demo-director transitions in
-`scenario-transitions.spec.ts`. PR-D/PR-E and Gate A1 remain the boundary for complete literal
-operator/DOM evidence. Design coverage: 15/16 have a mockup (2.5 needs none — it is the repo).
+`scenario-transitions.spec.ts`. The PR-D/PR-E literal oracles are DELIVERED; Gate A1's
+exact-merged-SHA acceptance run remains the boundary between delivered evidence and accepted
+evidence. Design coverage: 15/16 have a mockup (2.5 needs none — it is the repo).
 
 > **2.2 / 2.4 demo-data tuning (PR-7, landed 2026-08-01).** The score gate surfaced that the seed
 > produced no red device: a single below-band reading tops out at `warning` (`api/app/bands.py` —
@@ -86,10 +88,10 @@ These score in the **written 80% technical proposal**, not the live demo.
 ## Bottom line
 
 - **Clickable app:** ✅ topic ๑/๒/๓ screens live and wired to the backend.
-- **Implementation:** ✅ 16/16 built and wired; the remaining PR-D/PR-E evidence gaps are listed
-  above.
+- **Implementation:** ✅ 16/16 built and wired; the PR-D/PR-E literal oracles are delivered
+  (rows above), acceptance pending Gate A1.
 - **Acceptance:** ◑ Gate A1 pending; a warm `make demo-e2e` run is strong rehearsal evidence, not
-  a substitute for the missing literal oracles or the exact-SHA acceptance gate.
+  a substitute for the exact-SHA acceptance gate.
 - **Stack readiness:** Run `make demo-preflight` → `✓ DEMO READY`, then walk
   `docs/demo-runbook.md`; this preflight result describes the running stack, not final evidence
   acceptance.
