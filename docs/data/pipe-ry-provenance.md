@@ -15,9 +15,11 @@ than what is recorded here.
 | Branch | Every record carries PWA code `5531021` (Rayong branch) |
 | Encoding | UTF-8 DBF; fixed-width truncation leaves partial trailing codepoints |
 
-Exact file hashes are NOT recorded in this committed document — they identify a private
-delivery. They are recorded in the generated `manifest.json` (`source.files`), which
-stays local with the bundle.
+Exact file hashes and the canonical sidecar-set fingerprint are NOT recorded in this
+committed document — they identify a private delivery. Per-file hashes are recorded in
+the local generated manifest. The canonical fingerprint is recorded in the manifest AND
+must be supplied independently through the build/activation environment, so the bundle
+cannot approve its own replacement.
 
 ## Permission status
 
@@ -34,8 +36,27 @@ Consequences, enforced in code:
   paragraph before enabling the flag for any judged run.
 - **Rebuild on deploy (PR-R3):** a bundle built before PR-R3 lacks the `source.audit`
   record and the strict GeoJSON-member checks, so the API now fails it CLOSED (503). Before
-  enabling `PIPE_GIS_ENABLED` on any stack, re-run `make gis-build GIS_SOURCE=…` so the
-  bundle carries `source.audit` and pins the audited 9,273/19 counts.
+  enabling `PIPE_GIS_ENABLED` on any stack, re-run `make gis-build GIS_SOURCE=…
+  GIS_APPROVED_SOURCE_FINGERPRINT=…` so the bundle carries `source.audit`, pins the
+  audited 9,273/19 counts, and matches the independently approved source identity.
+
+### Source-fingerprint approval and activation
+
+1. The data owner/reviewer computes and records the canonical fingerprint outside the
+   source directory and outside `data/curated/pipe_ry/`. Do not derive approval from a
+   manifest produced by the same unreviewed build.
+2. Build with `GIS_APPROVED_SOURCE_FINGERPRINT=<approved 64-hex SHA-256>`. The builder
+   hashes the exact in-memory sidecar snapshot used for conversion and emits nothing when
+   it differs.
+3. The trusted build prints `bundle_sha256=<64-hex>`, covering the exact completed
+   `manifest.json`, `network.geojson`, and `map_ta_phut.geojson` bytes. Review and store
+   that value outside `PIPE_GIS_DIR`; do not copy it from a mutable bundle-side file.
+4. Provision the source value as
+   `PIPE_GIS_APPROVED_SOURCE_FINGERPRINT` when enabling the API. Startup compares it with
+   `manifest.source.fingerprint_sha256`. Also provision the exact completed-bundle value
+   as `PIPE_GIS_APPROVED_BUNDLE_SHA256`. Missing/malformed/mismatched values leave GIS 503.
+5. Rotate either approved value only through a new source/bundle review. Rebuild and exact-SHA
+   acceptance are mandatory after rotation.
 
 ## Transformations (scripts/build_pipe_gis.py)
 
@@ -55,7 +76,8 @@ Consequences, enforced in code:
    deterministic rule (longest focus pipe, ties to lowest id, CLI-overridable). The
    binding and marker placement are **SIMULATED** — they are demo decisions, not
    surveyed truth.
-7. Manifest: schema `pipe-ry-gis-1` with source hashes, per-file digests, counts,
+7. Manifest: schema `pipe-ry-gis-1` with the externally approved source fingerprint,
+   source hashes, per-file digests, counts,
    bounds, lengths, binding, the provenance boundary, and the official energy
    reference. The API refuses any bundle whose files drift from the manifest.
 
@@ -92,14 +114,11 @@ one served pipe, or whose `source.audit` claims a different branch / a count tha
 disagrees with the served payload. These reject a **malformed, wrong, or accidentally
 over-scoped** bundle — including an honest builder's bug or a partial sync.
 
-They are **not** cryptographic tamper-evidence. The manifest lives inside `PIPE_GIS_DIR`
-and is not signed, so an adversary who controls that directory can replace the GeoJSON
-bytes AND re-sign the manifest (recompute `sha256`/`bytes`) and re-assert
-`provenance.geometry = REAL` / `source.audit`. Authenticity against that threat rests on
-the **deployment trust boundary**: the bundle is permission-gated, operator-provisioned,
-and git-ignored (see §Permission status); `PIPE_GIS_ENABLED` is off by default. If the
-bundle directory ever becomes untrusted, the required hardening is an **external trust
-anchor** — a signature or expected digest/source-fingerprint stored OUTSIDE `PIPE_GIS_DIR`
-(and, for a judged run, an enabled-E2E assertion that pins that independent anchor). That
-anchor is deliberately out of scope while the feature is dark and the directory is
-operator-owned.
+The manifest is not signed, so it is not signer-attributed cryptographic evidence. The
+**build** is bound to an external source-identity anchor before it can emit REAL, and API
+activation is separately bound to an externally approved digest of the exact completed
+manifest and served payload bytes. Copying the public source-fingerprint literal while
+rewriting the bundle therefore fails closed. Strict fixed manifest strings/filenames and
+GeoJSON/property validators also block reviewed disclosure channels. Cross-domain signer
+attribution or delegated release would still require a signed manifest and key custody;
+the exact-bundle approval is a trusted-operator deployment boundary, not a PKI.

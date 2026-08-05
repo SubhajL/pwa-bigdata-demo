@@ -23,6 +23,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 GIS_ENDPOINTS = ("/api/twin/gis/manifest", "/api/twin/gis/network")
+APPROVED_SOURCE_FINGERPRINT = "ab" * 32
 
 
 def _client() -> TestClient:
@@ -94,12 +95,16 @@ def _write_valid_bundle(dir_: pathlib.Path) -> dict[str, Any]:
             "crs": "EPSG:32647",
             "output_crs": "EPSG:4326",
             "feature_count": 2,
-            "files": {"PIPE RY.shp": {"sha256": "ab" * 32, "bytes": 10}},
+            "fingerprint_sha256": APPROVED_SOURCE_FINGERPRINT,
+            "files": {
+                name: {"sha256": "ab" * 32, "bytes": 10}
+                for name in ("PIPE RY.shp", "PIPE RY.dbf", "PIPE RY.shx", "PIPE RY.prj")
+            },
             "audit": {
                 "branch_code": "5531021",
                 "global_id_unique": True,
-                "expected_full": None,
-                "expected_focus": None,
+                "expected_full": 2,
+                "expected_focus": 1,
             },
         },
         "datasets": datasets,
@@ -118,7 +123,8 @@ def _write_valid_bundle(dir_: pathlib.Path) -> dict[str, Any]:
             "placement": "SIMULATED",
             "distribution": (
                 "Source-derived artifacts stay local and git-ignored until the data "
-                "owner records redistribution permission."
+                "owner records redistribution permission "
+                "(docs/data/pipe-ry-provenance.md)."
             ),
         },
         "energy_reference": {
@@ -154,14 +160,33 @@ def _resign_dataset(dir_: pathlib.Path, scope: str, body: bytes) -> None:
     _rewrite_manifest(dir_, manifest)
 
 
+def _bundle_sha256(dir_: pathlib.Path) -> str:
+    digest = hashlib.sha256(b"pipe-ry-bundle-v1\0")
+    for name in ("manifest.json", "network.geojson", "map_ta_phut.geojson"):
+        payload = (dir_ / name).read_bytes()
+        name_bytes = name.encode("utf-8")
+        digest.update(len(name_bytes).to_bytes(4, "big"))
+        digest.update(name_bytes)
+        digest.update(len(payload).to_bytes(8, "big"))
+        digest.update(payload)
+    return digest.hexdigest()
+
+
 @pytest.fixture(autouse=True)
 def hermetic_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin the environment: a dead DB port (the GIS contract must hold without a
     database) and explicit GIS vars, so a developer's local `.env`/TimescaleDB cannot
     influence these tests (pydantic-settings lets real env vars beat the env file)."""
+    import app.models as gis_models
+
+    # The served fixture is intentionally tiny; production constants remain 9,273/19.
+    monkeypatch.setattr(gis_models, "AUDITED_FULL_COUNT", 2)
+    monkeypatch.setattr(gis_models, "AUDITED_FOCUS_COUNT", 1)
     monkeypatch.setenv("DATABASE_URL", "postgresql://pwa:pwa@127.0.0.1:9/pwa")
     monkeypatch.setenv("PIPE_GIS_ENABLED", "0")
     monkeypatch.setenv("PIPE_GIS_DIR", "")
+    monkeypatch.setenv("PIPE_GIS_APPROVED_SOURCE_FINGERPRINT", "")
+    monkeypatch.setenv("PIPE_GIS_APPROVED_BUNDLE_SHA256", "")
 
 
 @pytest.fixture()
@@ -170,6 +195,10 @@ def gis_enabled(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> path
     _write_valid_bundle(bundle_dir)
     monkeypatch.setenv("PIPE_GIS_ENABLED", "1")
     monkeypatch.setenv("PIPE_GIS_DIR", str(bundle_dir))
+    monkeypatch.setenv(
+        "PIPE_GIS_APPROVED_SOURCE_FINGERPRINT", APPROVED_SOURCE_FINGERPRINT
+    )
+    monkeypatch.setenv("PIPE_GIS_APPROVED_BUNDLE_SHA256", _bundle_sha256(bundle_dir))
     return bundle_dir
 
 
@@ -202,6 +231,108 @@ def test_gis_enabled_but_missing_bundle_returns_503(
     with _client() as client:
         for endpoint in GIS_ENDPOINTS:
             assert client.get(endpoint).status_code == 503, endpoint
+
+
+def test_enabled_gis_without_external_fingerprint_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, gis_enabled: pathlib.Path
+) -> None:
+    monkeypatch.delenv("PIPE_GIS_APPROVED_SOURCE_FINGERPRINT")
+    with _client() as client:
+        assert client.get("/api/twin/gis/manifest").status_code == 503
+
+
+def test_enabled_gis_with_mismatched_external_fingerprint_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, gis_enabled: pathlib.Path
+) -> None:
+    monkeypatch.setenv("PIPE_GIS_APPROVED_SOURCE_FINGERPRINT", "cd" * 32)
+    with _client() as client:
+        assert client.get("/api/twin/gis/manifest").status_code == 503
+
+
+def test_enabled_gis_with_matching_external_fingerprint_serves(
+    monkeypatch: pytest.MonkeyPatch, gis_enabled: pathlib.Path
+) -> None:
+    monkeypatch.setenv(
+        "PIPE_GIS_APPROVED_SOURCE_FINGERPRINT", APPROVED_SOURCE_FINGERPRINT.upper()
+    )
+    with _client() as client:
+        response = client.get("/api/twin/gis/manifest")
+    assert response.status_code == 200
+    assert response.json()["source"]["fingerprint_sha256"] == APPROVED_SOURCE_FINGERPRINT
+
+
+def test_enabled_gis_without_external_bundle_digest_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, gis_enabled: pathlib.Path
+) -> None:
+    monkeypatch.delenv("PIPE_GIS_APPROVED_BUNDLE_SHA256")
+    with _client() as client:
+        assert client.get("/api/twin/gis/manifest").status_code == 503
+
+
+def test_enabled_gis_with_mismatched_bundle_digest_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, gis_enabled: pathlib.Path
+) -> None:
+    monkeypatch.setenv("PIPE_GIS_APPROVED_BUNDLE_SHA256", "cd" * 32)
+    with _client() as client:
+        assert client.get("/api/twin/gis/manifest").status_code == 503
+
+
+def test_resigned_bundle_with_copied_source_fingerprint_fails_closed(
+    gis_enabled: pathlib.Path,
+) -> None:
+    manifest = json.loads((gis_enabled / "manifest.json").read_text(encoding="utf-8"))
+    # Still schema-valid: only the exact external bundle digest can catch this rewrite.
+    manifest["generated_at"] = "2026-08-06T00:00:00Z"
+    _rewrite_manifest(gis_enabled, manifest)
+    with _client() as client:
+        assert client.get("/api/twin/gis/manifest").status_code == 503
+
+
+@pytest.mark.parametrize(
+    "surface",
+    ("dataset", "filename", "source_digest", "binding_rule", "distribution"),
+)
+def test_manifest_narrative_surfaces_cannot_leak_private_source_values(
+    gis_enabled: pathlib.Path, surface: str
+) -> None:
+    manifest = json.loads((gis_enabled / "manifest.json").read_text(encoding="utf-8"))
+    if surface == "dataset":
+        manifest["source"]["dataset"] = "private audit remark"
+    elif surface == "filename":
+        manifest["source"]["files"]["private-audit-id.txt"] = {
+            "sha256": "ab" * 32,
+            "bytes": 1,
+        }
+    elif surface == "source_digest":
+        manifest["source"]["files"]["PIPE RY.shp"]["sha256"] = "private audit id"
+    elif surface == "binding_rule":
+        manifest["demo_binding"]["rule"] = "private operator note"
+    else:
+        manifest["provenance"]["distribution"] = "private redistribution note"
+    _rewrite_manifest(gis_enabled, manifest)
+    with _client() as client:
+        assert client.get("/api/twin/gis/manifest").status_code == 503
+
+
+def test_manifest_source_fingerprint_malformed_fails_closed(
+    gis_enabled: pathlib.Path,
+) -> None:
+    manifest = json.loads((gis_enabled / "manifest.json").read_text(encoding="utf-8"))
+    manifest["source"]["fingerprint_sha256"] = "not-a-sha256"
+    _rewrite_manifest(gis_enabled, manifest)
+    with _client() as client:
+        assert client.get("/api/twin/gis/manifest").status_code == 503
+
+
+def test_manifest_counts_must_equal_the_production_audit(
+    monkeypatch: pytest.MonkeyPatch, gis_enabled: pathlib.Path
+) -> None:
+    import app.models as gis_models
+
+    monkeypatch.setattr(gis_models, "AUDITED_FULL_COUNT", 9273)
+    monkeypatch.setattr(gis_models, "AUDITED_FOCUS_COUNT", 19)
+    with _client() as client:
+        assert client.get("/api/twin/gis/manifest").status_code == 503
 
 
 def test_gis_corrupt_manifest_returns_503(gis_enabled: pathlib.Path) -> None:

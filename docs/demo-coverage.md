@@ -11,7 +11,7 @@ Honest status of the scored 100-point demo. Read with `POC_SPEC.md` §4A (the ru
 
 **Refreshed 2026-08-05 with PR-D/PR-E.** The three demo topics are on screen (topic ๒ = PR-7,
 topic ๑ = PR-8, topic ๓ = PR-9), and all 16 scored items have implementation paths connected to
-their runtime entry points: **16/16 built and wired**. The current warm Playwright suite (33 specs
+their runtime entry points: **16/16 built and wired**. The current warm Playwright suite (34 specs
 including the demo-director transitions; the four real-geometry GIS proofs in
 `topic2-gis.spec.ts` self-skip while `PIPE_GIS_ENABLED` is off — PR-H lands dark) protects the strongest live paths, including the timed
 band `warning` → model `critical` → recovery sequence and the literal operator/DOM oracles for

@@ -38,6 +38,7 @@ const MANIFEST: GisManifest = {
     crs: "EPSG:32647",
     output_crs: "EPSG:4326",
     feature_count: 19,
+    fingerprint_sha256: "ab".repeat(32),
     files: { "PIPE RY.shp": { sha256: "ab", bytes: 10 } },
   },
   datasets: {

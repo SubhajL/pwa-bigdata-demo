@@ -72,6 +72,16 @@ class Settings(BaseSettings):
     #: map_ta_phut.geojson. Blank + enabled is a broken configuration -> routes 503.
     pipe_gis_dir: str = ""
 
+    #: Independently approved canonical SHA-256 of the complete source sidecar set.
+    #: This value MUST be provisioned outside PIPE_GIS_DIR; otherwise a replaced bundle
+    #: could rewrite its own manifest hashes and re-assert REAL provenance.
+    pipe_gis_approved_source_fingerprint: str = ""
+
+    #: Independently approved exact digest of the completed manifest + served GeoJSON.
+    #: This closes the remaining gap where a bundle replacer could copy the approved
+    #: source-fingerprint literal while rewriting the payload and its internal hashes.
+    pipe_gis_approved_bundle_sha256: str = ""
+
     #: Upper bound on a served GeoJSON file. The audited full network is ~6.6 MB; 50 MB
     #: leaves growth room while refusing to stream an absurd or swapped file.
     pipe_gis_max_bytes: int = 50_000_000

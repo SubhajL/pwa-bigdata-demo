@@ -45,14 +45,12 @@ export function GisNetworkView({
   const [markerEl] = useState(() => document.createElement("div"));
   const mapRef = useRef<maplibregl.Map | null>(null);
   const [loaded, setLoaded] = useState(false);
-  // True only after maplibre fired `load` AND the source/layers/camera/click wiring
-  // installed without throwing — the readiness signal the E2E waits on. A failed GL
-  // init never fires `load` (it fires `error`, handled below), so a blank canvas can
-  // never read ready. Deliberately NOT gated on `idle`: under software GL (headless
-  // Playwright) idle can be starved indefinitely while the map is in fact rendering.
+  // True only after the audited number of distinct base-layer pipes is returned by
+  // MapLibre's rendered-feature query. `load` and source parsing alone are insufficient:
+  // both can succeed while style/paint/WebGL failures leave a blank canvas.
   const [ready, setReady] = useState(false);
-  // A pre-load ErrorEvent (e.g. GPUInitializationError on a machine without WebGL2)
-  // means the map will NEVER load; the failure must be explicit, never a blank box.
+  // Any map error is fatal for this blank/offline style: there are no optional tiles,
+  // glyphs, or network resources whose failures could be safely ignored.
   const [mapFailed, setMapFailed] = useState(false);
   // Source-INGESTION proof: the number of DISTINCT source pipes MapLibre actually parsed
   // into its source cache, read once `sourcedata` reports the source loaded. This proves
@@ -62,6 +60,7 @@ export function GisNetworkView({
   // test as the paint guard). Read via `sourcedata`, not `idle`, which headless
   // software-GL can starve indefinitely (QCHECK round 1 relabelled this honestly).
   const [sourceFeatureCount, setSourceFeatureCount] = useState<number | null>(null);
+  const [renderedFeatureCount, setRenderedFeatureCount] = useState<number | null>(null);
   // Callbacks/props the mount-once effect reads live via refs, so a parent re-render
   // never tears down the map. The ref is written in an effect (not during render —
   // react-hooks/refs), which is early enough: map events cannot fire before effects.
@@ -82,21 +81,47 @@ export function GisNetworkView({
       attributionControl: false,
     });
     mapRef.current = map;
-    let mapLoaded = false;
-    // maplibre reports an unusable GPU (no WebGL2) as an ErrorEvent and then simply
-    // never fires `load`. Silence here would leave a blank 560px box — the same
-    // contract violation a silent 503 would be. Post-load errors (transient tile/style
-    // hiccups can't occur on a blank offline style) are not fatal and are ignored.
-    map.on("error", (event) => {
+    let failed = false;
+    const failMap = (event: unknown): void => {
       // Never swallow this silently: a style/GPU error is invisible on a blank map,
       // and the one line names the culprit (it cost a debugging session to find an
       // unlogged oklch-rejection here).
       const detail = (event as { error?: Error }).error;
       console.warn(`pipe-GIS map error: ${detail?.message ?? "unknown"}`);
-      if (!mapLoaded) setMapFailed(true);
-    });
+      failed = true;
+      setReady(false);
+      setMapFailed(true);
+    };
+    map.on("error", failMap);
     map.on("load", () => {
-      mapLoaded = true;
+      if (failed) return;
+      const refreshMapEvidence = (): void => {
+        if (failed || map.getLayer(GIS_CONFIG.lineLayerId) == null) return;
+        try {
+          const parsedCount = distinctNumericPipeIds(
+            map.querySourceFeatures(GIS_CONFIG.sourceId),
+          );
+          setSourceFeatureCount((previous) => Math.max(previous ?? 0, parsedCount));
+          const renderedCount = distinctNumericPipeIds(
+            map.queryRenderedFeatures({ layers: [GIS_CONFIG.lineLayerId] }),
+          );
+          setRenderedFeatureCount(renderedCount);
+          setReady(
+            renderedCount === initial.manifest.datasets["map-ta-phut"].feature_count,
+          );
+        } catch (error) {
+          failMap({ error: error instanceof Error ? error : new Error(String(error)) });
+        }
+      };
+      // Register data/render observers BEFORE addSource: in-memory GeoJSON can dispatch
+      // its first sourcedata/render events during the same turn, and a late listener
+      // leaves both diagnostic counts permanently empty on a fast browser.
+      map.on("sourcedata", (event: maplibregl.MapSourceDataEvent) => {
+        if (event.sourceId !== GIS_CONFIG.sourceId || !event.isSourceLoaded) return;
+        refreshMapEvidence();
+      });
+      map.on("render", refreshMapEvidence);
+      map.on("idle", refreshMapEvidence);
       map.addSource(GIS_CONFIG.sourceId, { type: "geojson", data: initial.network });
       const lineColor = resolveCssColor(GIS_CONFIG.colorTokens.line);
       map.addLayer({
@@ -126,28 +151,18 @@ export function GisNetworkView({
             [bounds[0][0], bounds[0][1]],
             [bounds[1][0], bounds[1][1]],
           ],
-          { padding: GIS_CONFIG.fitPadding },
+          // Initial camera placement is deterministic and immediate. A fly animation
+          // walks through low-zoom tiles and can keep an in-memory GeoJSON source in a
+          // perpetual not-loaded state under software WebGL, leaving a genuinely blank
+          // canvas while every DOM-level check passes.
+          { padding: GIS_CONFIG.fitPadding, animate: false },
         );
       }
       map.on("click", GIS_CONFIG.lineLayerId, (event: maplibregl.MapLayerMouseEvent) => {
         const raw: unknown = event.features?.[0]?.properties?.pipe_id;
         selectRef.current(typeof raw === "number" ? raw : null);
       });
-      // Source-ingestion proof (PR-R3 finding 6): when the source finishes loading, count
-      // the DISTINCT pipe ids MapLibre parsed (dedup across internal tiles) and keep the
-      // running maximum — progressive tile loads can only reveal more, never fewer.
-      map.on("sourcedata", (event: maplibregl.MapSourceDataEvent) => {
-        if (event.sourceId !== GIS_CONFIG.sourceId || !event.isSourceLoaded) return;
-        const parsed = map.querySourceFeatures(GIS_CONFIG.sourceId);
-        const ids = new Set<number>();
-        for (const feature of parsed) {
-          const pipeId: unknown = feature.properties?.pipe_id;
-          if (typeof pipeId === "number") ids.add(pipeId);
-        }
-        setSourceFeatureCount((previous) => Math.max(previous ?? 0, ids.size));
-      });
       setLoaded(true);
-      setReady(true);
     });
     // The marker element is REACT-RENDERED below; maplibre re-parents it into its
     // canvas container and drives the transform. Placement is the manifest's demo
@@ -209,6 +224,7 @@ export function GisNetworkView({
       data-highlighted-pipes={highlightedPipeIds.join(",")}
       data-map-ready={ready}
       data-source-features={sourceFeatureCount ?? ""}
+      data-rendered-features={renderedFeatureCount ?? ""}
       className="relative h-[560px] w-full overflow-hidden rounded-lg border border-outline-variant"
     >
       <div
@@ -223,8 +239,8 @@ export function GisNetworkView({
           className="absolute inset-0 flex items-center justify-center bg-surface-container-lowest p-4"
         >
           <p className="max-w-md text-center text-dense text-on-surface-variant">
-            ไม่สามารถเริ่มการแสดงผลแผนที่ได้ (เครื่องนี้ไม่รองรับ WebGL2) —
-            ระบบจะไม่แสดงภาพทดแทน · ใช้แผนผังกระบวนการแทน
+            ไม่สามารถแสดงผลแผนที่ GIS ได้ — ระบบจะไม่รับรองผืนผ้าใบว่างเป็นแผนที่
+            ที่พร้อมใช้งาน · ใช้แผนผังกระบวนการแทน
           </p>
         </div>
       )}
@@ -239,6 +255,17 @@ export function GisNetworkView({
         )}
     </div>
   );
+}
+
+function distinctNumericPipeIds(
+  features: readonly { readonly properties: { readonly pipe_id?: unknown } | null }[],
+): number {
+  const ids = new Set<number>();
+  for (const feature of features) {
+    const pipeId: unknown = feature.properties?.pipe_id;
+    if (typeof pipeId === "number") ids.add(pipeId);
+  }
+  return ids.size;
 }
 
 /** A style with NO external URLs: an empty source set over a token-coloured canvas.

@@ -572,6 +572,12 @@ GIS_PUBLIC_PROPERTY_KEYS: frozenset[str] = frozenset(
 #: audit claims any other branch — a different code is a different (wrong) shapefile.
 AUDITED_BRANCH_CODE = "5531021"
 
+#: Exact counts of the independently audited Rayong delivery. These are repeated in the
+#: offline builder and cross-checked by tests because the API image deliberately does not
+#: import build-time GIS tooling.
+AUDITED_FULL_COUNT = 9273
+AUDITED_FOCUS_COUNT = 19
+
 #: THE official figure (docs/data/pipe-ry-provenance.md). One constant, one source of
 #: truth: `EnergyReference` refuses a manifest that deviates in ANY field, because a
 #: different value/unit/year/operator/source would be an unsourced energy claim in a
@@ -593,8 +599,8 @@ class GisFileDigest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    sha256: str
-    bytes: int
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    bytes: int = Field(gt=0)
 
 
 class GisSourceAudit(BaseModel):
@@ -611,15 +617,15 @@ class GisSourceAudit(BaseModel):
     git-ignored; docs/data/pipe-ry-provenance.md §Permission/§Non-claims), not on this
     schema. What this schema DOES guarantee: a bundle the honest builder produced cannot
     lose its identity record, and one claiming a different branch or
-    `global_id_unique=false` is refused. `expected_full`/`expected_focus` record the count
-    contract when the operator pinned one (`--expect-full/--expect-focus`)."""
+    `global_id_unique=false` is refused. `expected_full`/`expected_focus` record the
+    non-overridable audited count contract (9,273/19)."""
 
     model_config = ConfigDict(extra="forbid")
 
     branch_code: str
     global_id_unique: Literal[True]
-    expected_full: int | None = None
-    expected_focus: int | None = None
+    expected_full: int = Field(gt=0)
+    expected_focus: int = Field(gt=0)
 
     @model_validator(mode="after")
     def _branch_is_the_audited_one(self) -> GisSourceAudit:
@@ -627,6 +633,16 @@ class GisSourceAudit(BaseModel):
             raise ValueError(
                 f"source audit branch {self.branch_code!r} is not the audited Rayong "
                 f"branch {AUDITED_BRANCH_CODE!r}"
+            )
+        if self.expected_full != AUDITED_FULL_COUNT:
+            raise ValueError(
+                f"source audit full count {self.expected_full} is not the audited "
+                f"Rayong count {AUDITED_FULL_COUNT}"
+            )
+        if self.expected_focus != AUDITED_FOCUS_COUNT:
+            raise ValueError(
+                f"source audit focus count {self.expected_focus} is not the audited "
+                f"Map Ta Phut count {AUDITED_FOCUS_COUNT}"
             )
         return self
 
@@ -636,12 +652,24 @@ class GisSource(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    dataset: str
+    dataset: Literal["PIPE RY (Rayong pipe GIS)"]
     crs: Literal["EPSG:32647"]
     output_crs: Literal["EPSG:4326"]
     feature_count: int = Field(gt=0)
+    fingerprint_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     files: dict[str, GisFileDigest]
     audit: GisSourceAudit
+
+    @model_validator(mode="after")
+    def _source_filenames_are_public_and_expected(self) -> GisSource:
+        required = {"PIPE RY.shp", "PIPE RY.dbf", "PIPE RY.shx", "PIPE RY.prj"}
+        allowed = required | {"PIPE RY.cpg", "PIPE RY.qmd"}
+        actual = set(self.files)
+        if not required.issubset(actual) or not actual.issubset(allowed):
+            raise ValueError(
+                "source file names differ from the reviewed PIPE RY sidecar set"
+            )
+        return self
 
 
 class GisDatasetSummary(BaseModel):
@@ -654,7 +682,7 @@ class GisDatasetSummary(BaseModel):
     #: [west, south, east, north] in WGS84 degrees.
     bounds_wgs84: list[float] = Field(min_length=4, max_length=4)
     length_m: float = Field(gt=0)
-    sha256: str
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     bytes: int = Field(gt=0)
 
 
@@ -667,9 +695,15 @@ class GisDemoBinding(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    scenario_asset_id: str
+    scenario_asset_id: Literal["P-2"]
     pipe_id: int
-    rule: str
+    rule: str = Field(
+        pattern=(
+            r"^(?:longest Map Ta Phut focus pipe, ties broken by lowest pipe id|"
+            r"configured pipe id [0-9]+)$"
+        ),
+        max_length=80,
+    )
     midpoint_wgs84: list[float] = Field(min_length=2, max_length=2)
     placement: Literal["SIMULATED"]
     properties: dict[str, GisPropertyValue]
@@ -694,7 +728,10 @@ class GisProvenance(BaseModel):
     attributes: Literal["REAL"]
     binding: Literal["SIMULATED"]
     placement: Literal["SIMULATED"]
-    distribution: str
+    distribution: Literal[
+        "Source-derived artifacts stay local and git-ignored until the data owner "
+        "records redistribution permission (docs/data/pipe-ry-provenance.md)."
+    ]
 
 
 class EnergyReference(BaseModel):
@@ -733,9 +770,21 @@ class GisManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal["pipe-ry-gis-1"]
-    generated_at: str
+    generated_at: datetime
     source: GisSource
     datasets: dict[str, GisDatasetSummary]
     demo_binding: GisDemoBinding
     provenance: GisProvenance
     energy_reference: EnergyReference
+
+    @model_validator(mode="after")
+    def _datasets_are_the_reviewed_fixed_bundle(self) -> GisManifest:
+        if set(self.datasets) != {"full", "map-ta-phut"}:
+            raise ValueError("manifest datasets must be exactly full and map-ta-phut")
+        if self.datasets["full"].file != "network.geojson":
+            raise ValueError("full dataset must be network.geojson")
+        if self.datasets["map-ta-phut"].file != "map_ta_phut.geojson":
+            raise ValueError("focus dataset must be map_ta_phut.geojson")
+        if self.source.feature_count != self.datasets["full"].feature_count:
+            raise ValueError("source feature count must equal the full dataset count")
+        return self

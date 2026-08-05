@@ -13,6 +13,7 @@ libraries. A missing dependency must fail this file loudly, not skip it.
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import pathlib
 from datetime import UTC, datetime
@@ -28,6 +29,7 @@ from scripts.build_pipe_gis import (
     SourceFeature,
     SourceSnapshot,
     build_bundle,
+    bundle_sha256,
     choose_demo_binding,
     feature_to_geojson,
     geometric_length_m,
@@ -40,6 +42,7 @@ from scripts.build_pipe_gis import (
     reproject_paths,
     safe_join,
     select_map_ta_phut_features,
+    source_snapshot_fingerprint,
     verify_source_identity,
 )
 
@@ -131,6 +134,41 @@ FIXTURE_FEATURES: list[tuple[dict[str, Any], list[list[list[float]]]]] = [
         [[[_E + 400.0, _N], [_E + 400.0, _N + 80.0]]],
     ),
 ]
+
+
+def _approved_fingerprint(shp_path: pathlib.Path) -> str:
+    return source_snapshot_fingerprint(load_source_snapshot(shp_path))
+
+
+def _build_fixture_bundle(
+    shp_path: pathlib.Path,
+    out_dir: pathlib.Path,
+    configured_pipe_id: int | None = None,
+    now: datetime | None = None,
+    *,
+    approved_source_fingerprint: str | None = None,
+) -> dict[str, Any]:
+    """Run the production builder against the five/two synthetic fixture contract.
+
+    Tests temporarily replace the reviewed module constants; product code exposes no
+    count parameter or alternate builder that an operator could call to relabel a
+    different-count source REAL.
+    """
+    import scripts.build_pipe_gis as bpg
+
+    original = (bpg.AUDITED_FULL_COUNT, bpg.AUDITED_FOCUS_COUNT)
+    bpg.AUDITED_FULL_COUNT = 5
+    bpg.AUDITED_FOCUS_COUNT = 2
+    try:
+        return bpg.build_bundle(
+            shp_path,
+            out_dir,
+            configured_pipe_id,
+            now,
+            approved_source_fingerprint=approved_source_fingerprint,
+        )
+    finally:
+        bpg.AUDITED_FULL_COUNT, bpg.AUDITED_FOCUS_COUNT = original
 
 
 def _write_fixture(
@@ -414,8 +452,11 @@ def built(
     fixture_shp: pathlib.Path, tmp_path_factory: pytest.TempPathFactory
 ) -> tuple[pathlib.Path, dict[str, Any]]:
     out = tmp_path_factory.mktemp("pipe_ry_out")
-    manifest = build_bundle(
-        fixture_shp, out, now=datetime(2026, 8, 5, 12, 0, 0, tzinfo=UTC)
+    manifest = _build_fixture_bundle(
+        fixture_shp,
+        out,
+        now=datetime(2026, 8, 5, 12, 0, 0, tzinfo=UTC),
+        approved_source_fingerprint=_approved_fingerprint(fixture_shp),
     )
     return out, manifest
 
@@ -449,6 +490,7 @@ def test_bundle_manifest_schema_counts_hashes_and_provenance(
     assert provenance["binding"] == "SIMULATED"
     assert provenance["placement"] == "SIMULATED"
     assert "permission" in provenance["distribution"].lower()
+    assert len(bundle_sha256(out)) == 64
 
 
 def test_bundle_energy_reference_is_official_context_only(
@@ -496,10 +538,15 @@ def test_written_geojson_parses_with_normalized_properties(
 
 def test_builder_manifest_validates_against_api_schema(
     built: tuple[pathlib.Path, dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # The builder and app.models.GisManifest must change together: a bundle the builder
     # writes has to be exactly what the API is willing to serve (plan A10 cross-check).
+    import app.models as gis_models
     from app.gis import validate_manifest
+
+    monkeypatch.setattr(gis_models, "AUDITED_FULL_COUNT", 5)
+    monkeypatch.setattr(gis_models, "AUDITED_FOCUS_COUNT", 2)
 
     out, manifest = built
     validated = validate_manifest(manifest)
@@ -528,14 +575,19 @@ def test_builder_geojson_passes_the_api_serve_validator(
 
 
 def test_cli_builds_bundle_with_configured_binding(
-    fixture_shp: pathlib.Path, tmp_path: pathlib.Path
+    fixture_shp: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import scripts.build_pipe_gis as bpg
+
+    monkeypatch.setattr(bpg, "AUDITED_FULL_COUNT", 5)
+    monkeypatch.setattr(bpg, "AUDITED_FOCUS_COUNT", 2)
     out = tmp_path / "bundle"
-    # The 5-feature fixture must OVERRIDE the audited 9,273/19 CLI defaults.
     code = main(
         [
             "--source", str(fixture_shp), "--out", str(out), "--bind-pipe-id", "101",
-            "--expect-full", "5", "--expect-focus", "2",
+            "--approved-source-fingerprint", _approved_fingerprint(fixture_shp),
         ]
     )
     assert code == 0
@@ -544,31 +596,33 @@ def test_cli_builds_bundle_with_configured_binding(
     assert (out / "network.geojson").exists() and (out / "map_ta_phut.geojson").exists()
 
 
-def test_cli_defaults_pass_exactly_the_audited_counts(
+def test_cli_has_no_count_override_flags(
     fixture_shp: pathlib.Path, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The bare command must pass EXACTLY 9273/19 to build_bundle — not merely "something
-    # other than the fixture's 5/2" (QCHECK round 4: the earlier check was too weak).
     import scripts.build_pipe_gis as bpg
-
-    captured: dict[str, Any] = {}
 
     def capturing_build(
         shp: pathlib.Path,
         out: pathlib.Path,
         configured_pipe_id: int | None = None,
         now: Any = None,
-        expect_full: int | None = None,
-        expect_focus: int | None = None,
+        *,
+        approved_source_fingerprint: str | None = None,
     ) -> dict[str, Any]:
-        captured["expect_full"] = expect_full
-        captured["expect_focus"] = expect_focus
-        raise GisBuildError("stop after capturing CLI defaults")
+        raise GisBuildError("stop after proving fixed CLI wiring")
 
     monkeypatch.setattr(bpg, "build_bundle", capturing_build)
-    code = main(["--source", str(fixture_shp), "--out", str(tmp_path / "b")])
+    code = main([
+        "--source", str(fixture_shp), "--out", str(tmp_path / "b"),
+        "--approved-source-fingerprint", _approved_fingerprint(fixture_shp),
+    ])
     assert code == 1
-    assert captured == {"expect_full": 9273, "expect_focus": 19}
+    with pytest.raises(SystemExit):
+        main([
+            "--source", str(fixture_shp), "--out", str(tmp_path / "b"),
+            "--expect-full", "5",
+            "--approved-source-fingerprint", _approved_fingerprint(fixture_shp),
+        ])
 
 
 def test_cli_bare_command_rejects_a_partial_export(
@@ -576,7 +630,10 @@ def test_cli_bare_command_rejects_a_partial_export(
 ) -> None:
     # End-to-end: the bare command (defaults 9273/19) hard-fails the 5-feature fixture, so
     # the direct CLI path can no longer bypass the count contract (QCHECK round 3).
-    code = main(["--source", str(fixture_shp), "--out", str(tmp_path / "b")])
+    code = main([
+        "--source", str(fixture_shp), "--out", str(tmp_path / "b"),
+        "--approved-source-fingerprint", _approved_fingerprint(fixture_shp),
+    ])
     assert code == 1
     assert not (tmp_path / "b" / "manifest.json").exists()
 
@@ -589,7 +646,10 @@ def test_cli_reports_failure_with_exit_code_1(
     _write_fixture(tmp_path)
     shp = tmp_path / "PIPE RY.shp"
     shp.write_bytes(shp.read_bytes()[:60])
-    code = main(["--source", str(shp), "--out", str(tmp_path / "bundle")])
+    code = main([
+        "--source", str(shp), "--out", str(tmp_path / "bundle"),
+        "--approved-source-fingerprint", _approved_fingerprint(shp),
+    ])
     assert code == 1
     assert "gis build failed" in capsys.readouterr().err
     assert not (tmp_path / "bundle" / "manifest.json").exists()
@@ -599,10 +659,16 @@ def test_cli_reports_failure_with_exit_code_1(
 
 
 def test_builder_branch_code_matches_the_api_constant() -> None:
+    import scripts.build_pipe_gis as bpg
+
     from app.models import AUDITED_BRANCH_CODE as API_BRANCH_CODE
+    from app.models import AUDITED_FOCUS_COUNT as API_FOCUS_COUNT
+    from app.models import AUDITED_FULL_COUNT as API_FULL_COUNT
     from app.models import GIS_PUBLIC_PROPERTY_KEYS
 
     assert AUDITED_BRANCH_CODE == API_BRANCH_CODE == "5531021"
+    assert bpg.AUDITED_FULL_COUNT == API_FULL_COUNT == 9273
+    assert bpg.AUDITED_FOCUS_COUNT == API_FOCUS_COUNT == 19
     # The builder's public output surface IS the API's serve-time allowlist — the two
     # constants must be identical or a re-signed bundle could sneak a key past one side.
     assert set(PROPERTY_ALLOWLIST.values()) == set(GIS_PUBLIC_PROPERTY_KEYS)
@@ -637,11 +703,26 @@ def test_verify_source_identity_rejects_missing_global_id() -> None:
 def test_build_bundle_enforces_pinned_counts(
     fixture_shp: pathlib.Path, tmp_path: pathlib.Path
 ) -> None:
-    with pytest.raises(GisBuildError, match="expected|99"):
-        build_bundle(fixture_shp, tmp_path / "a", expect_full=99)
-    with pytest.raises(GisBuildError, match="focus|7"):
-        build_bundle(fixture_shp, tmp_path / "b", expect_focus=7)
-    manifest = build_bundle(fixture_shp, tmp_path / "c", expect_full=5, expect_focus=2)
+    with pytest.raises(GisBuildError, match="9273"):
+        build_bundle(
+            fixture_shp,
+            tmp_path / "default",
+            approved_source_fingerprint=_approved_fingerprint(fixture_shp),
+        )
+    parameters = inspect.signature(build_bundle).parameters
+    assert "expect_full" not in parameters and "expect_focus" not in parameters
+    with pytest.raises(TypeError, match="expect_full"):
+        build_bundle(
+            fixture_shp,
+            tmp_path / "a",
+            expect_full=99,
+            approved_source_fingerprint=_approved_fingerprint(fixture_shp),
+        )
+    manifest = _build_fixture_bundle(
+        fixture_shp,
+        tmp_path / "c",
+        approved_source_fingerprint=_approved_fingerprint(fixture_shp),
+    )
     assert manifest["source"]["audit"]["expected_full"] == 5
     assert manifest["source"]["audit"]["expected_focus"] == 2
 
@@ -653,30 +734,50 @@ def test_bundle_manifest_records_enforced_source_audit(
     audit = manifest["source"]["audit"]
     assert audit["branch_code"] == AUDITED_BRANCH_CODE == "5531021"
     assert audit["global_id_unique"] is True
-    assert audit["expected_full"] is None and audit["expected_focus"] is None
+    assert audit["expected_full"] == 5 and audit["expected_focus"] == 2
 
 
 def test_build_wrong_branch_source_hard_fails(tmp_path: pathlib.Path) -> None:
     wrong = [(_record(201, "งานมาบตาพุด", pwaCode="0000000"), [[[_E, _N], [_E, _N + 10.0]]])]
     shp = _write_fixture(tmp_path, features=wrong)
     with pytest.raises(GisBuildError, match="5531021|branch"):
-        build_bundle(shp, tmp_path / "out")
+        build_bundle(
+            shp,
+            tmp_path / "out",
+            approved_source_fingerprint=_approved_fingerprint(shp),
+        )
 
 
 def test_gis_build_target_pins_audited_counts() -> None:
-    # The REAL build must pin the audited 9,273/19 counts, or the count contract is
-    # unenforced on the actual dataset (QCHECK round 1: the flags existed but the
-    # Makefile target never passed them).
+    # The REAL build has no operator-controlled count knobs. The reviewed builder owns
+    # 9,273/19 as source constants; changing the audit requires a source-code review.
     makefile = (pathlib.Path(__file__).resolve().parents[2] / "Makefile").read_text(
         encoding="utf-8"
     )
     gis_build = makefile.split("gis-build:", 1)[1].split("\n\n", 1)[0]
-    # Assert the exact WIRING (flag -> variable), not just the flag names, and the exact
-    # pinned assignments — not digits appearing anywhere in a comment (QCHECK rounds 2 & 4).
-    assert '--expect-full "$(GIS_EXPECT_FULL)"' in gis_build
-    assert '--expect-focus "$(GIS_EXPECT_FOCUS)"' in gis_build
-    assert "GIS_EXPECT_FULL ?= 9273" in makefile
-    assert "GIS_EXPECT_FOCUS ?= 19" in makefile
+    assert "--expect-full" not in gis_build and "--expect-focus" not in gis_build
+    import scripts.build_pipe_gis as bpg
+
+    assert bpg.AUDITED_FULL_COUNT == 9273
+    assert bpg.AUDITED_FOCUS_COUNT == 19
+    assert "GIS_APPROVED_SOURCE_FINGERPRINT" in gis_build
+    assert '--approved-source-fingerprint "$(GIS_APPROVED_SOURCE_FINGERPRINT)"' in gis_build
+
+
+def test_gis_activation_fingerprint_is_wired_through_operator_config() -> None:
+    root = pathlib.Path(__file__).resolve().parents[2]
+    compose = (root / "infra/docker-compose.yml").read_text(encoding="utf-8")
+    sample = (root / "infra/env.sample").read_text(encoding="utf-8")
+    assert (
+        'PIPE_GIS_APPROVED_SOURCE_FINGERPRINT: "'
+        '${PIPE_GIS_APPROVED_SOURCE_FINGERPRINT:-}"'
+    ) in compose
+    assert "PIPE_GIS_APPROVED_SOURCE_FINGERPRINT=" in sample
+    assert (
+        'PIPE_GIS_APPROVED_BUNDLE_SHA256: "${PIPE_GIS_APPROVED_BUNDLE_SHA256:-}"'
+        in compose
+    )
+    assert "PIPE_GIS_APPROVED_BUNDLE_SHA256=" in sample
 
 
 # ── PR-R3 finding 4: one source snapshot — hashes describe the CONVERTED bytes ─────────
@@ -687,6 +788,68 @@ def test_load_source_snapshot_reads_required_sidecars(fixture_shp: pathlib.Path)
     assert isinstance(snapshot, SourceSnapshot)
     for name in ("PIPE RY.shp", "PIPE RY.dbf", "PIPE RY.shx", "PIPE RY.prj"):
         assert snapshot.files[name]
+
+
+def test_source_snapshot_fingerprints_optional_qmd_sidecar(
+    fixture_shp: pathlib.Path,
+) -> None:
+    before = source_snapshot_fingerprint(load_source_snapshot(fixture_shp))
+    fixture_shp.with_suffix(".qmd").write_bytes(b"reviewed QGIS metadata")
+    snapshot = load_source_snapshot(fixture_shp)
+    assert snapshot.files["PIPE RY.qmd"] == b"reviewed QGIS metadata"
+    assert source_snapshot_fingerprint(snapshot) != before
+
+
+def test_source_snapshot_fingerprint_is_order_stable(fixture_shp: pathlib.Path) -> None:
+    snapshot = load_source_snapshot(fixture_shp)
+    reordered = SourceSnapshot(
+        shp_path=snapshot.shp_path,
+        files=dict(reversed(list(snapshot.files.items()))),
+    )
+    assert source_snapshot_fingerprint(snapshot) == source_snapshot_fingerprint(reordered)
+    assert len(source_snapshot_fingerprint(snapshot)) == 64
+
+
+def test_source_snapshot_fingerprint_changes_with_any_sidecar(
+    fixture_shp: pathlib.Path,
+) -> None:
+    snapshot = load_source_snapshot(fixture_shp)
+    changed_files = dict(snapshot.files)
+    changed_files["PIPE RY.dbf"] += b"same-count synchronized update"
+    changed = SourceSnapshot(shp_path=snapshot.shp_path, files=changed_files)
+    assert source_snapshot_fingerprint(snapshot) != source_snapshot_fingerprint(changed)
+
+
+def test_build_refuses_unapproved_source_fingerprint(
+    fixture_shp: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    out = tmp_path / "out"
+    with pytest.raises(GisBuildError, match="approved source fingerprint"):
+        build_bundle(
+            fixture_shp,
+            out,
+            approved_source_fingerprint="00" * 32,
+        )
+    assert not out.exists()
+
+
+def test_build_records_approved_source_fingerprint(
+    fixture_shp: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    approved = source_snapshot_fingerprint(load_source_snapshot(fixture_shp))
+    manifest = _build_fixture_bundle(
+        fixture_shp,
+        tmp_path / "out",
+        approved_source_fingerprint=approved.upper(),
+    )
+    assert manifest["source"]["fingerprint_sha256"] == approved
+
+
+def test_build_requires_approved_source_fingerprint(
+    fixture_shp: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    with pytest.raises(GisBuildError, match="approved source fingerprint"):
+        build_bundle(fixture_shp, tmp_path / "out")
 
 
 def test_inspect_and_read_accept_a_snapshot(fixture_shp: pathlib.Path) -> None:
@@ -719,7 +882,11 @@ def test_build_uses_a_single_source_snapshot(
         return audit
 
     monkeypatch.setattr(bpg, "inspect_source", inspect_then_resync)
-    manifest = build_bundle(shp, tmp_path / "out")
+    manifest = _build_fixture_bundle(
+        shp,
+        tmp_path / "out",
+        approved_source_fingerprint=_approved_fingerprint(shp),
+    )
     assert manifest["source"]["feature_count"] == 5
     assert manifest["datasets"]["full"]["feature_count"] == 5
     assert manifest["source"]["files"]["PIPE RY.shp"]["sha256"] == original_sha
