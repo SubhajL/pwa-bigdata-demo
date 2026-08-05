@@ -25,6 +25,7 @@ from psycopg_pool import ConnectionPool
 from .config import Settings, get_settings
 from .curated import load_curated
 from .db import get_pool
+from .gis import GisUnavailable, load_gis_bundle
 from .ingest import PipelineStatus, RawMessage
 from .model import get_loaded
 from .routes import curated as curated_routes
@@ -118,6 +119,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.artifact_sha256 = None
     app.state.scoring_deps = None
     app.state.curated = None
+    app.state.gis = None
+
+    # The pre-built pipe-GIS bundle (PR-G). Verified ONCE here; a failure leaves
+    # `app.state.gis` None, which the /api/twin/gis routes report as 503 while the
+    # logical twin carries on. Disabled (the default) simply stays None -> 404.
+    if settings.pipe_gis_enabled:
+        try:
+            app.state.gis = load_gis_bundle(settings)
+            logger.info("pipe-GIS bundle loaded from %s", settings.pipe_gis_dir)
+        except GisUnavailable:
+            logger.exception("pipe-GIS bundle unavailable; /api/twin/gis will return 503")
 
     # The REAL dataset, parsed once. Built HERE rather than at import time on purpose:
     # `/healthz` is deliberately dependency-free (see below), and an import-time read

@@ -1,0 +1,8 @@
+# Offline GIS builder dependencies (PR-G). Build-time ONLY — deliberately absent from
+# api/requirements.txt so the API image never carries GIS libraries; the API serves the
+# pre-built GeoJSON bundle. Install into the api venv, where the builder tests run:
+#
+#     api/.venv/bin/pip install -r scripts/requirements-gis.txt
+#
+pyshp==2.3.1
+pyproj==3.7.1

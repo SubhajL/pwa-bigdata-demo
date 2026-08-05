@@ -37,3 +37,7 @@ e2e/.playwright/
 # OS / editor
 .DS_Store
 *.swp
+
+# PR-G: source-derived Rayong GIS bundle — stays local until the data owner records
+# redistribution permission (docs/data/pipe-ry-provenance.md). Never commit.
+data/curated/pipe_ry/
