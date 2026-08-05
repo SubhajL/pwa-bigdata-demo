@@ -66,8 +66,8 @@ evidence. Design coverage: 15/16 have a mockup (2.5 needs none — it is the rep
 > inside the band" was **wrong** — the fault mode drives pressure **below the 2.0 low band**
 > (`simulator/tests/test_pressure_drop.py`), so item 2.4's pipe highlight fires as a
 > `warning`, which is what 2.4 requires. **Caveat that remains:** the live window averages every reading
-> in a clock-hour, so the *backfilled* P-2 reads red only near a **true cold start** (`make demo-down`
-> then preflight); after the sim runs a while, live normal-mode telemetry washes it toward `warning`.
+> in a clock-hour, so the *backfilled* P-2 reads red only near a **true cold start**
+> (`make demo-down CONFIRM_VOLUME_RESET=1` then preflight); after the sim runs a while, live normal-mode telemetry washes it toward `warning`.
 > **Retired by PR #30:** the demo director (`POST /api/demo/scenario`, runbook §0b) steers P-2's
 > feature window deterministically at any stack age, so the twin items no longer depend on running
 > shortly after a cold start.

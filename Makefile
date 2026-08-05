@@ -2,7 +2,7 @@
 # so a second operator can run the scored demo without knowing the internals.
 COMPOSE := docker compose -f infra/docker-compose.yml
 
-.PHONY: help demo-up demo-down demo-preflight demo-reconnect demo-scenario e2e-setup demo-e2e
+.PHONY: help demo-up demo-down demo-preflight demo-reconnect demo-scenario e2e-setup demo-e2e demo-acceptance-3x demo-e2e-cold
 
 help: ## list the demo targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-16s %s\n", $$1, $$2}'
@@ -10,8 +10,8 @@ help: ## list the demo targets
 demo-up: ## bring the full stack up (build if needed)
 	$(COMPOSE) up -d --build
 
-demo-down: ## stop the stack and REMOVE volumes (a true cold start next time)
-	$(COMPOSE) down -v
+demo-down: ## stop the stack and REMOVE volumes — refuses without CONFIRM_VOLUME_RESET=1
+	scripts/lib/volume-reset.sh
 
 demo-preflight: ## stack-readiness gate (up + wait healthy + every scored surface live; volumes preserved)
 	scripts/demo-preflight.sh
@@ -31,3 +31,12 @@ demo-e2e: ## the score gate: preflight, then run the 16-item Playwright E2E; res
 	trap 'FAULT_MODE=normal $(COMPOSE) up -d simulator >/dev/null 2>&1 || true' EXIT; \
 	scripts/demo-preflight.sh; \
 	pnpm --dir e2e test
+
+demo-acceptance-3x: ## Gate A1: THREE consecutive score-gate runs + exact-SHA evidence manifest (warm; volumes preserved)
+	RUNS=3 scripts/demo-acceptance.sh
+
+# ONE recipe line, and the confirmation guard lives INSIDE volume-reset.sh: a guard in a
+# separate recipe line is bypassable by `make -i` / MAKEFLAGS=-i, which ignores a failed
+# line and runs the next one. `&&` also stops the acceptance run when the reset refuses.
+demo-e2e-cold: ## TRUE cold acceptance: DESTROYS Docker volumes first — refuses without CONFIRM_VOLUME_RESET=1
+	scripts/lib/volume-reset.sh && RUNS=1 ACCEPTANCE_MODE=cold scripts/demo-acceptance.sh

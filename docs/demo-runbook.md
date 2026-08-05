@@ -15,8 +15,9 @@ make demo-preflight          # brings the stack up, waits healthy, checks every 
 ```
 It must end with **`✓ DEMO READY`**. If not, it prints which surface failed. Preflight warms
 the **existing** stack — volumes are preserved, so it is not a cold start by itself. A **true
-cold start** (fresh volumes → re-seed → re-backfill) is `make demo-down` **then**
-`make demo-preflight`. To run the whole automated gate instead (all 16 items in a real
+cold start** (fresh volumes → re-seed → re-backfill) is
+`make demo-down CONFIRM_VOLUME_RESET=1` **then** `make demo-preflight` — the confirmation is
+required because that step destroys the database volumes. To run the whole automated gate instead (all 16 items in a real
 browser): `make demo-e2e`.
 
 Reset the fault mode any time with `make demo-scenario MODE=normal`.
@@ -107,7 +108,8 @@ ordered rows.
 >
 > **⚠ Cold-start matters — unless you use the demo director (§0b).** The live scoring window
 > averages every reading in a clock-hour, so the *backfilled* P-2 reads red only near a true cold
-> start. On a warm stack, either run **`make demo-down`** then **`make demo-preflight`**, or simply
+> start. On a warm stack, either run **`make demo-down CONFIRM_VOLUME_RESET=1`** then
+> **`make demo-preflight`**, or simply
 > press **จำลองแรงดันตก** on the twin (§0b) — it steers the window deterministically at any stack age.
 
 ---
@@ -133,3 +135,49 @@ make demo-e2e     # runs all 16 items in a real browser against the live stack (
 Green = every scored behaviour is demonstrable. Spec ids map 1:1 to the rows above
 (`e2e/tests/topic{1,2,3}-*.spec.ts`); the demo-director transition arc of §0b is verified by
 `e2e/tests/scenario-transitions.spec.ts`. See `e2e/README.md`.
+
+## Gate A1 acceptance (exact-SHA evidence, PR-F)
+
+```bash
+make demo-acceptance-3x                        # 3 CONSECUTIVE score-gate runs, warm; volumes preserved
+make demo-e2e-cold CONFIRM_VOLUME_RESET=1     # true cold run — DESTROYS volumes; refuses without the flag
+```
+
+`demo-acceptance-3x` writes an **evidence manifest** to `evidence/` — the exact commit SHA
+(with a dirty flag), warm/cold label, the gate command that actually ran, the served
+`artifact_sha256` and TimescaleDB hypertable chunk count **sampled after the accepted run**
+(so provenance describes the runtime that passed), and per-run exit codes + durations. The
+first failed run aborts (Gate A1 demands consecutive passes) and the manifest still records
+the failure.
+
+**Destruction is fail-closed.** Volume removal exists in exactly one place —
+`scripts/lib/volume-reset.sh` — and both `make demo-down` and `make demo-e2e-cold` route
+through it. The confirmation check lives *inside* that script, in the same process as the
+`down -v`, so `make -i` (or an inherited `MAKEFLAGS=-i`, which ignores a failed recipe
+line) cannot step past it. Without `CONFIRM_VOLUME_RESET=1` exactly, no Docker command
+runs at all.
+
+**A cold label is earned, not asserted.** A successful reset mints a **single-use cold
+capability** (outside the worktree, so a clean checkout still reports `dirty: false`); the
+acceptance runner *atomically claims* it before the gate starts, and refuses a `cold` label
+without one — so a warm stack cannot be recorded as cold, one reset cannot authorize two
+runs, and a stale, future-dated, or different-compose-project capability is rejected.
+Likewise `DEMO_E2E_CMD` (the harness's own test seam) is **refused** outside
+`ACCEPTANCE_TEST_MODE=1` (exactly `1`), and test-mode manifests carry the
+`demo-acceptance/v1-test` schema plus `test_mode: true` — a contract-test record can never
+be mistaken for Gate A1 evidence.
+
+**What the manifest does and does not authenticate.** It records the exact SHA, the gate
+command *and the absolute executable it resolved to*, and provenance sampled from the
+runtime that passed; the runner strips `MAKEFLAGS`/`MFLAGS`/`MAKELEVEL`/`MAKEOVERRIDES`
+before invoking the gate, so an inherited `-i`/`-n` cannot turn a failing or skipped suite
+into an "ACCEPTED" record. It is evidence about a run **on a trusted operator machine** —
+it is not signed, and it does not attest the host's `PATH` or toolchain. Gate A1 therefore
+means: this manifest, produced from a clean merged SHA on the demo machine, and committed
+alongside the log that cites it.
+
+**Evidence conventions:** a Gate A1 run commits its manifest(s) from `evidence/` and the
+Coding Log links them by filename next to the counts it claims — a number in a log without
+its manifest is an assertion, not evidence. The harness itself is behaviorally tested in
+`api/tests/test_acceptance_harness.py` (confirmation guard, exact-SHA capture, three-run
+failure propagation, warm/cold labels, and the five-case provenance-probe matrix).
