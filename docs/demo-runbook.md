@@ -112,6 +112,22 @@ ordered rows.
 > **`make demo-preflight`**, or simply
 > press **จำลองแรงดันตก** on the twin (§0b) — it steers the window deterministically at any stack age.
 
+### Optional GIS view — แผนที่ GIS มาบตาพุด (PR-H, ships DARK)
+
+The `/operations` screen carries a second tab, **แผนที่ GIS มาบตาพุด**: real Rayong pipe
+geometry (MapLibre canvas, 19-feature Map Ta Phut focus) synchronized to the same live
+scenario state, with a field-level provenance legend — pipe lines/attributes are **REAL**
+(from the delivered shapefile), the `0.54 kWh/m³` figure is an **OFFICIAL** East Water
+2025 system-wide reference (context only, never a station value or target), and device
+status, the P-2 placement/pipe binding, and customer impact remain **SIMULATED**.
+
+It is OFF by default and stays off for judged runs until data-owner permission is
+recorded in `docs/data/pipe-ry-provenance.md`; the tab then shows an explicit
+"ยังไม่เปิดใช้งาน" notice and the logical schematic loses nothing. To rehearse locally:
+`make gis-build GIS_SOURCE='<path>/PIPE RY.shp'`, then start the stack with
+`PIPE_GIS_ENABLED=1`. A missing or hash-drifted bundle fails closed (503 + explicit
+unavailable state) — the map never substitutes synthetic lines.
+
 ---
 
 ## Topic ๓ — AI Predictive Maintenance (30 pts) · screen: **การพยากรณ์** (`/predictive`)

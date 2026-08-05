@@ -40,7 +40,14 @@ the repository Compose file, project `pwa-demo`, API `http://localhost:8000`, an
 
 `tests/topic1-pipeline.spec.ts` (1.1–1.5), `topic2-twin.spec.ts` (2.1–2.5),
 `topic3-predictive.spec.ts` (3.1–3.6 + a global SIMULATED-marker check), and
-`scenario-transitions.spec.ts` (the PR #30 demo-director transitions) — see the trigger→evidence
+`scenario-transitions.spec.ts` (the PR #30 demo-director transitions)
+
+`topic2-gis.spec.ts` (PR-H): the dark-landing UX runs on EVERY stack (on a GIS-enabled
+stack the GIS endpoints are route-stubbed to 404 for that one test); the four
+real-geometry proofs self-skip unless the stack reports `PIPE_GIS_ENABLED=1` (local
+rehearsal only until GIS data permission is recorded — a 503 from an enabled stack FAILS,
+it is not a skip). The recovery proof restores `pressure_drop` in a `finally`, preserving
+the degraded warm state the later specs depend on. — see the trigger→evidence
 mapping in `docs/demo-runbook.md`.
 
 Twin items **2.2** (socket status update), **2.4** (pressure-drop impact panel), and the item-3.3

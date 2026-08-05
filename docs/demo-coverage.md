@@ -11,8 +11,9 @@ Honest status of the scored 100-point demo. Read with `POC_SPEC.md` §4A (the ru
 
 **Refreshed 2026-08-05 with PR-D/PR-E.** The three demo topics are on screen (topic ๒ = PR-7,
 topic ๑ = PR-8, topic ๓ = PR-9), and all 16 scored items have implementation paths connected to
-their runtime entry points: **16/16 built and wired**. The current warm Playwright suite (27 specs
-including the demo-director transitions) protects the strongest live paths, including the timed
+their runtime entry points: **16/16 built and wired**. The current warm Playwright suite (33 specs
+including the demo-director transitions; the four real-geometry GIS proofs in
+`topic2-gis.spec.ts` self-skip while `PIPE_GIS_ENABLED` is off — PR-H lands dark) protects the strongest live paths, including the timed
 band `warning` → model `critical` → recovery sequence and the literal operator/DOM oracles for
 topic ๓; their exact-merged-SHA acceptance remains Gate A1's.
 
@@ -48,9 +49,11 @@ complete E2E-readiness claim.
 | 3.5 | Prioritized Worklist (5) | ◑ built/wired; first-three rendered↔API row oracle delivered (PR-E); exact-SHA acceptance pending Gate A1 | PR-5, screen PR-9 | `topic3 3.5` (first-three rendered↔API, visible cells) |
 | 3.6 | Root Cause Analysis (5) | ◑ built/wired; induced rendered-cause variation oracle delivered (PR-E); exact-SHA acceptance pending Gate A1 | PR-4/PR-5, screen PR-9 | `topic3 3.6` + `3.6b` (induced top-cause change) |
 
-**Implementation coverage: 16/16 built and wired.** Current automated evidence is 27 Playwright
-specs, including a global SIMULATED-marker check and the demo-director transitions in
-`scenario-transitions.spec.ts`. The PR-D/PR-E literal oracles are DELIVERED; Gate A1's
+**Implementation coverage: 16/16 built and wired.** Current automated evidence is 33 Playwright
+specs, including a global SIMULATED-marker check, the demo-director transitions in
+`scenario-transitions.spec.ts`, and the PR-H GIS view specs in `topic2-gis.spec.ts` (dark-landing
+UX always; the four real-geometry proofs run only on a locally GIS-enabled stack and are NOT part
+of scored evidence until data-owner permission is recorded). The PR-D/PR-E literal oracles are DELIVERED; Gate A1's
 exact-merged-SHA acceptance run remains the boundary between delivered evidence and accepted
 evidence. Design coverage: 15/16 have a mockup (2.5 needs none — it is the repo).
 
