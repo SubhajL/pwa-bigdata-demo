@@ -116,6 +116,32 @@ def test_runbook_requires_full_artifact_digest_comparison() -> None:
     assert "64" in row.group(0), "the runbook no longer requires all digest characters"
 
 
+def test_runbook_describes_fail_closed_v2_acceptance() -> None:
+    """Gate A1 instructions must match the source/compose/cold contract literally."""
+    runbook = _read(RUNBOOK)
+    section = re.search(r"^## Gate A1 acceptance.*?(?=^## |\Z)", runbook, re.M | re.S)
+    assert section is not None, "runbook lost the Gate A1 section"
+    text = section.group(0)
+    for required in (
+        "EVIDENCE_DIR=/absolute/path/outside/worktree",
+        "HEAD == origin/main",
+        "source_before",
+        "source_after",
+        "compose",
+        "/usr/bin/make",
+        "refreshes `origin/main`",
+        "canonical GitHub HTTPS/SSH `origin`",
+        "verified origin URL",
+        "non-canonical API/web endpoints",
+        "GIT_DIR",
+        "same execution",
+        "demo-acceptance/v2-test",
+    ):
+        assert required in text, f"Gate A1 runbook omits {required!r}"
+    for stale in ("single-use cold capability", "atomically claims", "evidence/"):
+        assert stale not in text, f"Gate A1 runbook retains stale receipt-era claim {stale!r}"
+
+
 def test_no_real_customer_claim() -> None:
     """Seeded/simulated impact customers are never presented as real ones."""
     sources = [(p, _read(p)) for p in _CUSTOMER_CLAIM_FILES]

@@ -16,6 +16,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import stat
 import subprocess
 
@@ -118,6 +119,87 @@ def _run_acceptance(
         ["bash", str(ACCEPTANCE)],
         capture_output=True, text=True, timeout=60, cwd=REPO,
         env=_env_with(stubs, EVIDENCE_DIR=str(evidence), **env),
+    )
+
+
+def _production_repo(tmp_path: pathlib.Path) -> pathlib.Path:
+    """Make a clean, exact-origin/main repo containing only the acceptance entry points."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    root = tmp_path / "candidate"
+    remote = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+    for relative in (
+        "scripts/demo-acceptance.sh",
+        "scripts/lib/volume-reset.sh",
+        "scripts/lib/demo-compose.sh",
+        "infra/docker-compose.yml",
+    ):
+        source = REPO / relative
+        if not source.exists():
+            continue
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+    acceptance = root / "scripts" / "demo-acceptance.sh"
+    acceptance_source = acceptance.read_text(encoding="utf-8").replace(
+        'EXPECTED_ORIGIN_HTTPS="https://github.com/SubhajL/pwa-bigdata-demo.git"',
+        f'EXPECTED_ORIGIN_HTTPS="{remote}"',
+    )
+    acceptance.write_text(acceptance_source, encoding="utf-8")
+    (root / "Makefile").write_text(
+        ".PHONY: demo-e2e\n"
+        "demo-e2e:\n"
+        "\t@true\n",
+        encoding="utf-8",
+    )
+    (root / "tracked.txt").write_text("candidate\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-b", "main"], cwd=root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "acceptance@example.test"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "Acceptance Test"], cwd=root, check=True)
+    subprocess.run(["git", "add", "."], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-m", "candidate"], cwd=root, check=True, capture_output=True)
+    subprocess.run(["git", "remote", "add", "origin", str(remote)], cwd=root, check=True)
+    subprocess.run(
+        ["git", "push", "--set-upstream", "origin", "main"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "--git-dir", str(remote), "symbolic-ref", "HEAD", "refs/heads/main"],
+        check=True,
+    )
+    return root
+
+
+def _set_production_gate(root: pathlib.Path, *recipe_lines: str) -> None:
+    """Commit and publish the fixture's real `/usr/bin/make demo-e2e` recipe."""
+    makefile = root / "Makefile"
+    recipe = "".join(f"\t@{line}\n" for line in recipe_lines)
+    makefile.write_text(f".PHONY: demo-e2e\ndemo-e2e:\n{recipe}", encoding="utf-8")
+    subprocess.run(["git", "add", "Makefile"], cwd=root, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "configure fixture gate"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(["git", "push", "origin", "main"], cwd=root, check=True, capture_output=True)
+
+
+def _run_production_acceptance(
+    root: pathlib.Path,
+    stubs: pathlib.Path,
+    evidence: pathlib.Path,
+    **env: str,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["bash", str(root / "scripts" / "demo-acceptance.sh")],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=root,
+        env=_env_with(stubs, EVIDENCE_DIR=str(evidence), RUNS="1", **env),
     )
 
 
@@ -312,26 +394,10 @@ def test_test_mode_manifests_are_not_gate_a1_class(tmp_path: pathlib.Path) -> No
     )
     assert result.returncode == 0, result.stdout + result.stderr
     (manifest,) = _manifests(evidence)
-    assert manifest["schema"] == "demo-acceptance/v1-test"
+    assert manifest["schema"] == "demo-acceptance/v2-test"
     assert manifest["test_mode"] is True
-
-
-def test_a_cold_label_requires_an_actual_volume_reset(tmp_path: pathlib.Path) -> None:
-    """`ACCEPTANCE_MODE=cold` on a warm stack labelled a run cold with no reset — the label
-    must be bound to the guarded reset that produced it (g-check HIGH)."""
-    stubs, evidence = tmp_path / "stubs", tmp_path / "evidence"
-    stubs.mkdir()
-    _stub_stack(stubs)
-    result = subprocess.run(
-        ["bash", str(ACCEPTANCE)],
-        capture_output=True, text=True, timeout=60, cwd=REPO,
-        env=_env_with(
-            stubs, EVIDENCE_DIR=str(evidence), DEMO_E2E_CMD="true", RUNS="1",
-            ACCEPTANCE_MODE="cold",
-        ),
-    )
-    assert result.returncode != 0, "a cold label was accepted without a reset receipt"
-    assert not _manifests(evidence)
+    assert "ACCEPTED" not in result.stdout
+    assert "TEST HARNESS PASSED" in result.stdout
 
 
 def test_provenance_is_sampled_after_the_accepted_run(tmp_path: pathlib.Path) -> None:
@@ -381,14 +447,7 @@ def test_concurrent_runs_do_not_collide_on_one_manifest(tmp_path: pathlib.Path) 
     assert len(_manifests(evidence)) == 2
 
 
-# ── QCHECK round 2: the evidence must be truthful about WHAT ran, and the cold
-#    capability must be unforgeable, stack-bound, and single-use ─────────────────────────
-
-
-def _receipt_dir(tmp_path: pathlib.Path) -> pathlib.Path:
-    d = tmp_path / "state"
-    d.mkdir(exist_ok=True)
-    return d
+# ── remediation: source identity, same-execution cold reset, and compose identity ───────
 
 
 def test_manifest_records_the_resolved_executable_not_just_the_string(
@@ -403,7 +462,7 @@ def test_manifest_records_the_resolved_executable_not_just_the_string(
     _stub_stack(stubs)
     _stub(stubs, "make", "exit 0")  # a shadowing `make` that runs no gate
     result = _run_acceptance(
-        stubs, evidence, RUNS="1", ACCEPTANCE_STATE_DIR=str(_receipt_dir(tmp_path))
+        stubs, evidence, RUNS="1", ACCEPTANCE_TEST_MODE="1"
     )
     assert result.returncode == 0, result.stdout + result.stderr
     (manifest,) = _manifests(evidence)
@@ -413,103 +472,360 @@ def test_manifest_records_the_resolved_executable_not_just_the_string(
 
 
 def test_a_fabricated_receipt_cannot_authorize_a_cold_label(tmp_path: pathlib.Path) -> None:
-    """Writing an epoch into the receipt path, without ever running the guarded reset,
-    produced a passed production cold manifest (g-check HIGH)."""
+    """Cold evidence is authorized only by a confirmed reset in this same process."""
+    root = _production_repo(tmp_path)
     stubs, evidence = tmp_path / "stubs", tmp_path / "evidence"
     stubs.mkdir()
     _stub_stack(stubs)
-    state = _receipt_dir(tmp_path)
+    state = tmp_path / "state"
+    state.mkdir()
     (state / "volume-reset-receipt").write_text("1754300000\n", encoding="utf-8")
-    result = _run_acceptance(
-        stubs, evidence, RUNS="1", ACCEPTANCE_MODE="cold",
-        ACCEPTANCE_STATE_DIR=str(state), DEMO_E2E_CMD_IGNORED="1",
+    result = _run_production_acceptance(
+        root,
+        stubs,
+        evidence,
+        ACCEPTANCE_MODE="cold",
+        ACCEPTANCE_STATE_DIR=str(state),
     )
-    assert result.returncode != 0, "a hand-written receipt authorized a cold acceptance"
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "CONFIRM_VOLUME_RESET=1" in result.stdout + result.stderr
     assert not _manifests(evidence)
 
 
-def test_one_receipt_authorizes_exactly_one_cold_run(tmp_path: pathlib.Path) -> None:
-    """Two cold runners crossed the check concurrently and BOTH wrote passed cold
-    manifests from a single receipt (g-check HIGH): the claim must be atomic."""
+def test_cold_reset_and_gate_share_one_acceptance_execution(tmp_path: pathlib.Path) -> None:
+    """The cold runner itself resets first, then gates; no external receipt can bridge them."""
+    root = _production_repo(tmp_path)
+    stubs, evidence = tmp_path / "stubs", tmp_path / "evidence"
+    stubs.mkdir()
+    calls = tmp_path / "calls.log"
+    _stub(stubs, "curl", _curl_stub_json(DIGEST_A))
+    _stub(stubs, "docker", f'echo "docker $@" >> "{calls}"; exit 0')
+    _set_production_gate(
+        root,
+        f'grep -q "down --volumes" "{calls}" || exit 9',
+        f'echo "make demo-e2e" >> "{calls}"',
+    )
+    result = _run_production_acceptance(
+        root,
+        stubs,
+        evidence,
+        ACCEPTANCE_MODE="cold",
+        CONFIRM_VOLUME_RESET="1",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    lines = calls.read_text(encoding="utf-8").splitlines()
+    reset_at = next(i for i, line in enumerate(lines) if "down --volumes" in line)
+    gate_at = next(i for i, line in enumerate(lines) if line.startswith("make "))
+    assert reset_at < gate_at
+    (manifest,) = _manifests(evidence)
+    assert manifest["mode"] == "cold"
+    assert manifest["result"] == "passed"
+
+
+def test_production_refuses_dirty_source_before_gate_or_manifest(tmp_path: pathlib.Path) -> None:
+    root = _production_repo(tmp_path)
+    stubs, evidence = tmp_path / "stubs", tmp_path / "evidence"
+    stubs.mkdir()
+    calls = tmp_path / "gate-calls.log"
+    _stub_stack(stubs)
+    _set_production_gate(root, f'echo gate >> "{calls}"')
+    (root / "dirty.txt").write_text("not committed\n", encoding="utf-8")
+    result = _run_production_acceptance(root, stubs, evidence)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "clean" in result.stdout + result.stderr
+    assert not calls.exists(), "a dirty candidate reached the score gate"
+    assert not _manifests(evidence)
+
+
+def test_inherited_git_context_cannot_hide_a_dirty_candidate(tmp_path: pathlib.Path) -> None:
+    """`git -C` still honors GIT_DIR/GIT_WORK_TREE. A caller could otherwise redirect
+    every source snapshot to a clean decoy while executing scripts from a dirty candidate."""
+    root = _production_repo(tmp_path / "real")
+    decoy = _production_repo(tmp_path / "decoy")
+    stubs, evidence = tmp_path / "stubs", tmp_path / "evidence"
+    stubs.mkdir()
+    calls = tmp_path / "gate-calls.log"
+    _stub_stack(stubs)
+    _set_production_gate(root, f'echo gate >> "{calls}"')
+    (root / "dirty.txt").write_text("not committed\n", encoding="utf-8")
+
+    result = _run_production_acceptance(
+        root,
+        stubs,
+        evidence,
+        GIT_DIR=str(decoy / ".git"),
+        GIT_WORK_TREE=str(decoy),
+    )
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "clean" in result.stdout + result.stderr
+    assert not calls.exists(), "a decoy Git context let dirty source reach the gate"
+    assert not _manifests(evidence)
+
+
+def test_dirty_cold_candidate_cannot_reach_the_destructive_reset(tmp_path: pathlib.Path) -> None:
+    root = _production_repo(tmp_path)
+    stubs, evidence = tmp_path / "stubs", tmp_path / "evidence"
+    stubs.mkdir()
+    calls = tmp_path / "docker-calls.log"
+    _stub(stubs, "curl", _curl_stub_json(DIGEST_A))
+    _stub(stubs, "docker", f'echo "$@" >> "{calls}"')
+    (root / "dirty.txt").write_text("not committed\n", encoding="utf-8")
+    result = _run_production_acceptance(
+        root,
+        stubs,
+        evidence,
+        ACCEPTANCE_MODE="cold",
+        CONFIRM_VOLUME_RESET="1",
+    )
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert not calls.exists(), "source validation happened after the destructive reset"
+    assert not _manifests(evidence)
+
+
+def test_production_refuses_head_that_is_not_origin_main(tmp_path: pathlib.Path) -> None:
+    root = _production_repo(tmp_path)
     stubs, evidence = tmp_path / "stubs", tmp_path / "evidence"
     stubs.mkdir()
     _stub_stack(stubs)
-    # PRODUCTION mode (the test seam skips the receipt by design): a stubbed `make`
-    # stands in for the gate, exactly as the resolved-executable test does.
-    _stub(stubs, "make", "exit 0")
-    state = _receipt_dir(tmp_path)
+    (root / "tracked.txt").write_text("new commit\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-m", "ahead"], cwd=root, check=True, capture_output=True)
+    result = _run_production_acceptance(root, stubs, evidence)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "origin/main" in result.stdout + result.stderr
+    assert not _manifests(evidence)
+
+
+def test_production_refreshes_origin_main_before_accepting(tmp_path: pathlib.Path) -> None:
+    root = _production_repo(tmp_path)
+    stubs, evidence = tmp_path / "stubs", tmp_path / "evidence"
+    stubs.mkdir()
+    _stub_stack(stubs)
+    other = tmp_path / "other"
     subprocess.run(
-        ["bash", str(REPO / "scripts" / "lib" / "volume-reset.sh")],
-        capture_output=True, text=True, timeout=60, cwd=REPO,
-        env=_env_with(stubs, CONFIRM_VOLUME_RESET="1", ACCEPTANCE_STATE_DIR=str(state)),
+        ["git", "clone", str(tmp_path / "origin.git"), str(other)],
         check=True,
+        capture_output=True,
     )
-    procs = [
-        subprocess.Popen(
-            ["bash", str(ACCEPTANCE)],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=REPO,
-            env=_env_with(
-                stubs, EVIDENCE_DIR=str(evidence), RUNS="1", ACCEPTANCE_MODE="cold",
-                ACCEPTANCE_STATE_DIR=str(state),
-            ),
-        )
-        for _ in range(2)
-    ]
-    codes = [p.wait(timeout=60) for p in procs]
-    assert sorted(codes)[0] == 0 and sorted(codes)[1] != 0, (
-        f"exactly one cold runner may claim the receipt; got exits {codes}"
+    subprocess.run(
+        ["git", "config", "user.email", "acceptance@example.test"], cwd=other, check=True
     )
-    assert len(_manifests(evidence)) == 1
+    subprocess.run(["git", "config", "user.name", "Acceptance Test"], cwd=other, check=True)
+    (other / "remote.txt").write_text("advanced\n", encoding="utf-8")
+    subprocess.run(["git", "add", "remote.txt"], cwd=other, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "advance remote"],
+        cwd=other,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(["git", "push", "origin", "main"], cwd=other, check=True, capture_output=True)
 
+    result = _run_production_acceptance(root, stubs, evidence)
 
-def test_a_future_or_malformed_receipt_is_refused(tmp_path: pathlib.Path) -> None:
-    """Age had no LOWER bound, so a future timestamp passed (g-check HIGH)."""
-    stubs, evidence = tmp_path / "stubs", tmp_path / "evidence"
-    stubs.mkdir()
-    _stub_stack(stubs)
-    for content in ("99999999999\n", "not-a-number\n", "\n"):
-        state = tmp_path / f"state-{abs(hash(content))}"
-        state.mkdir()
-        (state / "volume-reset-receipt").write_text(content, encoding="utf-8")
-        result = _run_acceptance(
-            stubs, evidence, RUNS="1", ACCEPTANCE_MODE="cold",
-            ACCEPTANCE_STATE_DIR=str(state),
-        )
-        assert result.returncode != 0, f"receipt {content!r} was accepted"
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "origin/main" in result.stdout + result.stderr
     assert not _manifests(evidence)
 
 
-def test_the_receipt_lives_outside_the_worktree(tmp_path: pathlib.Path) -> None:
-    """A receipt written inside the repo made every default cold manifest report
-    `dirty: true` on a clean checkout (g-check MEDIUM)."""
-    reset = (REPO / "scripts" / "lib" / "volume-reset.sh").read_text(encoding="utf-8")
-    assert "EVIDENCE_DIR" not in reset.split("# ")[0] or "ACCEPTANCE_STATE_DIR" in reset
-    assert "ACCEPTANCE_STATE_DIR" in reset, (
-        "the reset receipt must live in a state dir outside the worktree"
+def test_production_refuses_a_decoy_origin_url(tmp_path: pathlib.Path) -> None:
+    root = _production_repo(tmp_path)
+    stubs, evidence = tmp_path / "stubs", tmp_path / "evidence"
+    stubs.mkdir()
+    _stub_stack(stubs)
+    decoy = tmp_path / "decoy.git"
+    subprocess.run(
+        ["git", "clone", "--bare", str(tmp_path / "origin.git"), str(decoy)],
+        check=True,
+        capture_output=True,
     )
-    acceptance = ACCEPTANCE.read_text(encoding="utf-8")
-    assert "ACCEPTANCE_STATE_DIR" in acceptance
+    subprocess.run(["git", "remote", "set-url", "origin", str(decoy)], cwd=root, check=True)
+
+    result = _run_production_acceptance(root, stubs, evidence)
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "canonical GitHub origin" in result.stdout + result.stderr
+    assert not _manifests(evidence)
 
 
-def test_the_reset_refuses_to_follow_a_symlinked_receipt_path(
-    tmp_path: pathlib.Path,
-) -> None:
-    """Redirection followed a planted symlink and overwrote its target — a confirmed reset
-    must not extend data loss beyond the Docker volumes (g-check MEDIUM)."""
+def test_production_refuses_stack_and_endpoint_overrides(tmp_path: pathlib.Path) -> None:
+    root = _production_repo(tmp_path)
     stubs = tmp_path / "stubs"
     stubs.mkdir()
-    _stub(stubs, "docker", "exit 0")
-    state = _receipt_dir(tmp_path)
-    victim = tmp_path / "victim.txt"
-    victim.write_text("precious\n", encoding="utf-8")
-    (state / "volume-reset-receipt").symlink_to(victim)
-
-    subprocess.run(
-        ["bash", str(REPO / "scripts" / "lib" / "volume-reset.sh")],
-        capture_output=True, text=True, timeout=60, cwd=REPO,
-        env=_env_with(stubs, CONFIRM_VOLUME_RESET="1", ACCEPTANCE_STATE_DIR=str(state)),
+    _stub_stack(stubs)
+    alternate_compose = tmp_path / "alternate-compose.yml"
+    shutil.copy2(root / "infra" / "docker-compose.yml", alternate_compose)
+    overrides = (
+        {"COMPOSE_FILE_PATH": str(alternate_compose)},
+        {"COMPOSE_PROJECT_NAME": "other-demo"},
+        {"API_BASE": "http://localhost:18000"},
+        {"WEB_BASE": "http://localhost:15173"},
     )
-    assert victim.read_text(encoding="utf-8") == "precious\n", "the symlink target was overwritten"
+    for index, override in enumerate(overrides):
+        evidence = tmp_path / f"evidence-{index}"
+        result = _run_production_acceptance(root, stubs, evidence, **override)
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert not _manifests(evidence)
+
+
+def test_production_ignores_a_path_shadowed_make(tmp_path: pathlib.Path) -> None:
+    root = _production_repo(tmp_path)
+    _set_production_gate(root, "false")
+    stubs, evidence = tmp_path / "stubs", tmp_path / "evidence"
+    stubs.mkdir()
+    _stub_stack(stubs)
+    _stub(stubs, "make", "exit 0")
+
+    result = _run_production_acceptance(root, stubs, evidence)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "ACCEPTED" not in result.stdout
+    (manifest,) = _manifests(evidence)
+    assert manifest["result"] == "failed"
+    assert manifest["gate_command_resolved"] == "/usr/bin/make"
+
+
+def test_production_refuses_evidence_inside_the_worktree(tmp_path: pathlib.Path) -> None:
+    root = _production_repo(tmp_path)
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    _stub_stack(stubs)
+    evidence = root / "evidence"
+    result = _run_production_acceptance(root, stubs, evidence)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "outside the worktree" in result.stdout + result.stderr
+    assert not evidence.exists()
+
+
+def test_source_drift_during_gate_writes_invalid_manifest(tmp_path: pathlib.Path) -> None:
+    root = _production_repo(tmp_path)
+    stubs, evidence = tmp_path / "stubs", tmp_path / "evidence"
+    stubs.mkdir()
+    _stub_stack(stubs)
+    tracked = root / "tracked.txt"
+    _set_production_gate(root, f'echo drift >> "{tracked}"')
+    result = _run_production_acceptance(root, stubs, evidence)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "ACCEPTED" not in result.stdout
+    (manifest,) = _manifests(evidence)
+    assert manifest["schema"] == "demo-acceptance/v2"
+    assert manifest["result"] == "invalid"
+    assert manifest["failure_reason"]
+    source_after = manifest["source_after"]
+    assert isinstance(source_after, dict)
+    assert source_after["clean"] is False
+
+
+def test_origin_rewrite_during_gate_invalidates_the_manifest(tmp_path: pathlib.Path) -> None:
+    root = _production_repo(tmp_path)
+    stubs, evidence = tmp_path / "stubs", tmp_path / "evidence"
+    stubs.mkdir()
+    _stub_stack(stubs)
+    decoy = tmp_path / "gate-decoy.git"
+    _set_production_gate(
+        root,
+        f'git -C "{root}" remote set-url origin "{decoy}"',
+    )
+    subprocess.run(
+        ["git", "clone", "--bare", str(tmp_path / "origin.git"), str(decoy)],
+        check=True,
+        capture_output=True,
+    )
+
+    result = _run_production_acceptance(root, stubs, evidence)
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "ACCEPTED" not in result.stdout
+    (manifest,) = _manifests(evidence)
+    assert manifest["result"] == "invalid"
+    assert "origin URL changed" in str(manifest["failure_reason"])
+
+
+def test_production_manifest_binds_source_and_compose_identity(tmp_path: pathlib.Path) -> None:
+    root = _production_repo(tmp_path)
+    stubs, evidence = tmp_path / "stubs", tmp_path / "evidence"
+    stubs.mkdir()
+    _stub_stack(stubs)
+    result = _run_production_acceptance(root, stubs, evidence)
+    assert result.returncode == 0, result.stdout + result.stderr
+    (manifest,) = _manifests(evidence)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    assert manifest["schema"] == "demo-acceptance/v2"
+    assert manifest["sha"] == manifest["origin_main"] == head
+    origin_url = str(tmp_path / "origin.git")
+    assert manifest["source_before"] == {
+        "sha": head,
+        "origin_main": head,
+        "origin_url": origin_url,
+        "clean": True,
+    }
+    assert manifest["source_after"] == {
+        "sha": head,
+        "origin_main": head,
+        "origin_url": origin_url,
+        "clean": True,
+    }
+    assert manifest["compose"] == {
+        "file": str(root / "infra" / "docker-compose.yml"),
+        "project": "pwa-demo",
+    }
+    assert manifest["endpoints"] == {
+        "api": "http://localhost:8000",
+        "web": "http://localhost:5173",
+    }
+    assert manifest["source_tool"] == {
+        "git_command_resolved": "/usr/bin/git",
+        "remote_verified": True,
+    }
+
+
+def test_reset_no_longer_mints_or_consumes_receipts() -> None:
+    reset = (REPO / "scripts" / "lib" / "volume-reset.sh").read_text(encoding="utf-8")
+    acceptance = ACCEPTANCE.read_text(encoding="utf-8")
+    for source in (reset, acceptance):
+        assert "volume-reset-receipt" not in source
+        assert "ACCEPTANCE_STATE_DIR" not in source
+
+
+def test_production_origin_allowlist_names_the_canonical_repository() -> None:
+    acceptance = ACCEPTANCE.read_text(encoding="utf-8")
+    assert 'EXPECTED_ORIGIN_HTTPS="https://github.com/SubhajL/pwa-bigdata-demo.git"' in acceptance
+    assert 'EXPECTED_ORIGIN_SSH="git@github.com:SubhajL/pwa-bigdata-demo.git"' in acceptance
+
+
+def test_all_demo_entry_points_share_file_and_project_identity() -> None:
+    shared = (REPO / "scripts" / "lib" / "demo-compose.sh").read_text(encoding="utf-8")
+    assert 'COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-pwa-demo}"' in shared
+    compose_array = (
+        'DEMO_COMPOSE=(docker compose --file "$COMPOSE_FILE_PATH" '
+        '--project-name "$COMPOSE_PROJECT_NAME")'
+    )
+    assert compose_array in shared
+
+    for relative in (
+        "scripts/demo-acceptance.sh",
+        "scripts/demo-preflight.sh",
+        "scripts/demo-reconnect.sh",
+        "scripts/demo-scenario.sh",
+        "scripts/lib/volume-reset.sh",
+        "scripts/lib/artifact-provenance-probe.sh",
+    ):
+        source = (REPO / relative).read_text(encoding="utf-8")
+        assert "demo-compose.sh" in source, f"{relative} bypasses the shared compose context"
+        assert '"${DEMO_COMPOSE[@]}"' in source, f"{relative} does not execute that context"
+
+    makefile = (REPO / "Makefile").read_text(encoding="utf-8")
+    assert "COMPOSE_FILE_PATH ?=" in makefile
+    assert "COMPOSE_PROJECT_NAME ?= pwa-demo" in makefile
+    assert "--file $(COMPOSE_FILE_PATH) --project-name $(COMPOSE_PROJECT_NAME)" in makefile
+
+    e2e = (REPO / "e2e" / "lib" / "api.ts").read_text(encoding="utf-8")
+    assert "execSync" not in e2e
+    assert "composeArgs" in e2e and "--project-name" in e2e
+    assert 'execFileSync("docker"' in e2e
 
 
 def test_test_mode_requires_exactly_one(tmp_path: pathlib.Path) -> None:
@@ -521,7 +837,6 @@ def test_test_mode_requires_exactly_one(tmp_path: pathlib.Path) -> None:
     for bad in ("0", "true", " ", "2"):
         result = _run_acceptance(
             stubs, evidence, RUNS="1", DEMO_E2E_CMD="true", ACCEPTANCE_TEST_MODE=bad,
-            ACCEPTANCE_STATE_DIR=str(_receipt_dir(tmp_path)),
         )
         assert result.returncode != 0, f"ACCEPTANCE_TEST_MODE={bad!r} was honored"
     assert not _manifests(evidence)
@@ -543,8 +858,7 @@ def test_inherited_makeflags_cannot_forge_a_passed_manifest(tmp_path: pathlib.Pa
     )
     for flags in ("-i", "-n", "i"):
         result = _run_acceptance(
-            stubs, evidence, RUNS="1", MAKEFLAGS=flags,
-            ACCEPTANCE_STATE_DIR=str(_receipt_dir(tmp_path)),
+            stubs, evidence, RUNS="1", MAKEFLAGS=flags, ACCEPTANCE_TEST_MODE="1",
         )
         assert result.returncode != 0, f"MAKEFLAGS={flags!r} produced an accepted run"
         manifests = _manifests(evidence)

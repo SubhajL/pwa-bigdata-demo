@@ -3,7 +3,7 @@
  * and a poll-until. The scenario controls shell out to Docker, so a spec never fakes state — it
  * drives the same mechanism a judge would.
  */
-import { execFileSync, execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 export const API_BASE = process.env.API_BASE ?? "http://localhost:8000";
@@ -11,7 +11,16 @@ export const WEB_BASE = process.env.WEB_BASE ?? "http://localhost:5173";
 
 /** Repo root (…/e2e/lib/api.ts → ../../). */
 export const REPO = fileURLToPath(new URL("../..", import.meta.url));
-const COMPOSE = `${REPO}/infra/docker-compose.yml`;
+export const COMPOSE_FILE_PATH = process.env.COMPOSE_FILE_PATH ?? `${REPO}/infra/docker-compose.yml`;
+export const COMPOSE_PROJECT_NAME = process.env.COMPOSE_PROJECT_NAME ?? "pwa-demo";
+
+export function composeArgs(...args: string[]): string[] {
+  return ["compose", "--file", COMPOSE_FILE_PATH, "--project-name", COMPOSE_PROJECT_NAME, ...args];
+}
+
+function runCompose(args: string[], env: NodeJS.ProcessEnv = process.env): void {
+  execFileSync("docker", composeArgs(...args), { stdio: "ignore", env });
+}
 
 export type FaultMode = "normal" | "anomaly" | "pressure_drop" | "bad_asset" | "malformed";
 
@@ -57,7 +66,7 @@ export async function webOk(path = "/"): Promise<boolean> {
 
 /** Recreate the simulator with a fault mode (the demo's real scenario mechanism). */
 export function setFault(mode: FaultMode): void {
-  execSync(`FAULT_MODE=${mode} docker compose -f "${COMPOSE}" up -d simulator`, { stdio: "ignore" });
+  runCompose(["up", "-d", "simulator"], { ...process.env, FAULT_MODE: mode });
 }
 
 // ── P0 demo-scenario API (the deterministic director; no docker round-trip) ──────────────
@@ -92,17 +101,17 @@ export function demoStatus(): Promise<{ enabled: boolean; active_run_id: string 
 
 /** Restart the MQTT broker (item 1.2 disconnect). */
 export function restartBroker(): void {
-  execSync(`docker compose -f "${COMPOSE}" restart mosquitto`, { stdio: "ignore" });
+  runCompose(["restart", "mosquitto"]);
 }
 
 /** Stop the MQTT broker — a controlled outage long enough to be judge-visible (item 1.2). */
 export function stopBroker(): void {
-  execSync(`docker compose -f "${COMPOSE}" stop mosquitto`, { stdio: "ignore" });
+  runCompose(["stop", "mosquitto"]);
 }
 
 /** Start the MQTT broker again after `stopBroker()` (idempotent when already up). */
 export function startBroker(): void {
-  execSync(`docker compose -f "${COMPOSE}" start mosquitto`, { stdio: "ignore" });
+  runCompose(["start", "mosquitto"]);
 }
 
 export interface PipelineStatus {
@@ -151,8 +160,10 @@ const MARKER_GRAMMAR = /^[a-z0-9][a-z0-9-]{0,80}$/;
 function feedbackSql(sql: string): string {
   return execFileSync(
     "docker",
-    ["compose", "-f", COMPOSE, "exec", "-T", "timescaledb",
-     "timeout", "8", "psql", "-U", "pwa", "-d", "pwa", "-tA", "-c", sql],
+    composeArgs(
+      "exec", "-T", "timescaledb", "timeout", "8", "psql", "-U", "pwa", "-d", "pwa",
+      "-tA", "-c", sql,
+    ),
     { encoding: "utf8" },
   ).trim();
 }

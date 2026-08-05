@@ -10,7 +10,7 @@ set -euo pipefail
 API="${API_BASE:-http://localhost:8000}"
 BUDGET_S="${DEMO_RECONNECT_BUDGET_S:-30}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-COMPOSE=(docker compose -f "$ROOT/infra/docker-compose.yml")
+source "$ROOT/scripts/lib/demo-compose.sh"
 
 field() { # field-name : print a top-level field of the status JSON, or empty on error
   curl -sf "$API/api/pipeline/status" 2>/dev/null \
@@ -33,7 +33,7 @@ fi
 restart_broker() {
   # Python is already a runtime dependency of this script's JSON readers. Its subprocess
   # timeout actively terminates a stuck Compose client instead of checking only after return.
-  python3 - "$BUDGET_S" "${COMPOSE[@]}" restart mosquitto <<'PY'
+  python3 - "$BUDGET_S" "${DEMO_COMPOSE[@]}" restart mosquitto <<'PY'
 import subprocess
 import sys
 

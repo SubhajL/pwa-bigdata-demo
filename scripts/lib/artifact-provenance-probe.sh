@@ -17,13 +17,13 @@ set -euo pipefail
 
 API="${1:?usage: artifact-provenance-probe.sh <API_BASE>}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-COMPOSE_FILE="${COMPOSE_FILE_PATH:-$ROOT/infra/docker-compose.yml}"
+source "$ROOT/scripts/lib/demo-compose.sh"
 LABEL="topic ๓ · artifact provenance"
 
 api_sha=$(curl -sf --connect-timeout 2 --max-time 5 "$API/api/model" 2>/dev/null \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['artifact_sha256'])" 2>/dev/null) \
   || api_sha=""
-img_sha=$(docker compose -f "$COMPOSE_FILE" exec -T api timeout 8 python3 -c \
+img_sha=$("${DEMO_COMPOSE[@]}" exec -T api timeout 8 python3 -c \
   "import hashlib,os; p=(os.environ.get('MODEL_PATH') or '').strip() or '/srv/artifacts/model.pkl'; print(hashlib.sha256(open(p,'rb').read()).hexdigest())" \
   2>/dev/null) || img_sha=""
 [[ "$api_sha" =~ ^[0-9a-f]{64}$ ]] || api_sha=""

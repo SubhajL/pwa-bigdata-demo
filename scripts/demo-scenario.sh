@@ -23,10 +23,10 @@ case "$MODE" in
 esac
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-COMPOSE=(docker compose -f "$ROOT/infra/docker-compose.yml")
+source "$ROOT/scripts/lib/demo-compose.sh"
 
 echo "→ switching simulator to FAULT_MODE=$MODE …"
-FAULT_MODE="$MODE" "${COMPOSE[@]}" up -d simulator >/dev/null
+FAULT_MODE="$MODE" "${DEMO_COMPOSE[@]}" up -d simulator >/dev/null
 echo "✓ simulator recreated with FAULT_MODE=$MODE"
 echo "  (allow ~10-15s for the new run's telemetry to reach the twin / pipeline before asserting)"
 

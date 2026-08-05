@@ -753,3 +753,109 @@ The independent QCHECK medium finding about visually ellipsized RCA labels was r
 - PR-R2 must still close PR-F acceptance integrity. No cold reset or cold acceptance was run because destructive approval remains separate.
 
 Verdict: approve the staged PR-R1 candidate for commit and the normal PR lifecycle.
+
+## 2026-08-05 14:12:00 +07 — PR-R2 implementation summary
+
+### Scope and merge dependency
+
+- Branch/worktree: `fix/acceptance-integrity` in `/Users/subhajlimanond/dev/worktrees/pwa-prf-remediation.20260805`.
+- Base source: PR-R1 merge `38530d0ee34ce2f5e6f118ac7c114fefce8b2a14`, with `HEAD == origin/main` before PR-R2 edits.
+- PR-R1 was merged as GitHub PR #38 after its formal clean review; GitHub exposed no hosted status checks.
+- The dirty primary checkout remained untouched. No Docker volumes were deleted and no true-cold run was attempted.
+- Auggie semantic search was attempted with its required two-second limit and returned `AUGGIE_TIMEOUT_2S`; implementation proceeded through direct file inspection and exact-string wiring searches.
+
+### RED evidence
+
+- The first focused acceptance run failed 10 tests (22 passed). The failures pinned the v2 schema, removal of the forgeable receipt protocol, same-execution reset ordering, production refusal of dirty/stale source, external evidence storage, source-drift invalidation, source/Compose manifest identity, and shared Compose context.
+- Evidence documentation initially failed 1 test (8 passed) because it did not state the v2 source/Compose/same-execution/external-evidence contract.
+- An intermediate focused run found `git status` failure was captured but did not set `clean_after=false`: 1 failed, 41 passed. The post-gate source snapshot now fails closed.
+- A final wording regression proved test-mode output still contained `ACCEPTED`: 1 failed. Test-mode output now says `TEST HARNESS PASSED` and is explicitly non-Gate-A1 evidence.
+
+### Minimal GREEN implementation
+
+- `scripts/lib/demo-compose.sh` is the single Bash source of truth for an absolute Compose file and explicit project name (default `pwa-demo`). Make, Bash operators, provenance probes, and TypeScript E2E helpers now use the same pair.
+- Production acceptance refuses before reset, gate, or manifest unless the worktree is clean, `HEAD == refs/remotes/origin/main`, and the evidence directory resolves outside the checkout.
+- Cold acceptance performs the exact-confirmation check, guarded volume reset, and score gate within one acceptance execution. The receipt/capability protocol is removed and fabricated receipt files have no effect.
+- The runner rechecks HEAD, local origin/main, and worktree cleanliness after the score gate. Any drift writes a v2 manifest with `result=invalid` and a reason, exits 2, and never prints ACCEPTED.
+- The v2 manifest binds before/after source identity, Compose file/project identity, resolved gate executable, warm/cold mode, runtime probes, per-run exit/timing data, and verdict. Exclusive file creation prevents overwrites.
+- Test-only command injection produces `demo-acceptance/v2-test` and never emits production acceptance wording.
+
+### Wiring verification
+
+- Make exports `COMPOSE_FILE_PATH`/`COMPOSE_PROJECT_NAME` and passes explicit `--file`/`--project-name` arguments to its own Compose commands and the browser process.
+- `demo-acceptance.sh`, preflight, reconnect, scenario, volume reset, and artifact provenance all source `demo-compose.sh` and execute `${DEMO_COMPOSE[@]}`.
+- `e2e/lib/api.ts` uses `execFileSync` with `composeArgs`; no shell-composed Docker command remains in its simulator, broker, or feedback-DB helpers.
+- `make demo-e2e-cold` invokes only the acceptance runner; the runner invokes the sole destructive owner, `volume-reset.sh`, immediately before its own gate.
+- The runbook, coverage matrix, E2E README, SQL operator example, and behavioral/static tests use the same source, evidence, Compose, and cold semantics.
+
+### Validation
+
+- Focused acceptance/documentation suite: 42/42 passed after remediation, including repeated consecutive passes.
+- Full API: 366/366 passed in 133.43 seconds; Ruff and mypy passed.
+- Full web: 540/540 passed; lint, typecheck, and production build passed.
+- ML: 46 passed, 4 skipped.
+- Bash syntax, E2E TypeScript compilation, and working-tree whitespace checks passed.
+- Warm live `TSDB_PORT=15433 make demo-e2e` passed 27/27 browser tests in 1.7 minutes using the explicit `pwa-demo` Compose identity. The override preserves the unrelated `trend-paper-db` service occupying host port 5433.
+- A production-mode dirty-source drill exited 2 before the gate and produced no manifest.
+- Contract-test mode produced the v2-test source/Compose evidence shape; behavioral tests prove it cannot print production `ACCEPTED` wording.
+- `TSDB_PORT=15433 scripts/demo-scenario.sh normal` restored the normal director/simulator state; the API, broker, simulator, TimescaleDB, and web services were running.
+
+### Residual boundary
+
+- The live 27/27 run is warm pre-commit rehearsal, not exact-merged-SHA Gate A1 evidence.
+- PR-R2 still requires independent QCHECK, formal staged g-check, commit, PR merge, and exact-merge verification.
+- A true-cold Gate A1 run remains separately authorized because it destroys Docker volumes.
+
+## 2026-08-05 14:58:00 +07 — PR-R2 independent QCHECK disposition
+
+Verdict: changes requested in two rounds; every finding accepted and remediated.
+
+First review:
+
+- HIGH: inherited `GIT_DIR`/`GIT_WORK_TREE` and related variables redirected `git -C` to a clean decoy while dirty candidate scripts ran. Reproduced with a production-class v2 ACCEPTED manifest. The runner now executes every source operation through `/usr/bin/git` under `env -i`; the new regression is RED before and GREEN after the fix.
+- HIGH: production accepted arbitrary Compose files/projects and API/web endpoints, allowing one stack to serve as evidence for another. Production now pins the candidate Compose file, `pwa-demo`, and the canonical local API/web endpoints; four negative override cases pass.
+- MEDIUM: a PATH-shadowed `make` could return success without running the candidate gate. Production now executes `/usr/bin/make`; production-positive fixtures use a real committed Makefile, and a shadowed-make regression proves the candidate's failing recipe wins.
+- MEDIUM: cached `origin/main` could be stale. Production now fetches `origin main` before the first snapshot and after the gate; a decoupled remote-advance regression proves stale local truth is refused.
+
+Re-review:
+
+- MEDIUM: mutable untracked `.git/config` could repoint `origin` to a decoy repository. Reproduced RED with a bare decoy containing the old commit. Production now allowlists the canonical GitHub HTTPS/SSH URLs before fetch and records the verified URL in the manifest.
+- MEDIUM on the final pass: the gate itself could rewrite `.git/config` after the initial allowlist check, causing the post-gate fetch to trust a decoy while the manifest retained the original URL. Reproduced RED with a committed gate recipe that repointed origin to a bare decoy. The runner now re-reads the URL before its second fetch, refuses to contact a changed origin, records both URLs, and invalidates the manifest.
+
+Amended validation:
+
+- Focused acceptance/documentation suite: 48/48 passed.
+- Ruff, shell syntax, E2E TypeScript, and working-tree whitespace passed.
+- Full API after the first four dispositions: 370/370 passed in 131.17 seconds. The final origin-allowlist change is confined to the acceptance runner and its focused behavioral/docs tests.
+- No destructive reset was performed and runtime state was not changed by the read-only QCHECKs or stubbed contract tests.
+
+Final independent re-review verdict: clean. The reviewer confirmed the post-gate origin comparison, invalid-on-drift behavior, before/after manifest fields, and gate-time decoy regression; no integrity finding remains.
+
+## 2026-08-05 15:18:00 +07 — Formal g-check: staged PR-R2 candidate
+
+Review target: staged changes on `fix/acceptance-integrity` against PR-R1 merge `38530d0ee34ce2f5e6f118ac7c114fefce8b2a14`.
+
+### Findings
+
+No unresolved critical, high, medium, or low findings.
+
+The independent review's two high and four medium findings were each reproduced and remediated before this formal review: poisoned Git context, cross-stack/endpoints substitution, PATH-shadowed make, stale remote-tracking truth, pre-gate decoy origin, and gate-time origin drift. The final runner fails closed before destruction, binds production evidence to canonical source/runtime identities, and invalidates post-gate source or origin drift.
+
+### Verification considered
+
+- RED/GREEN behavioral evidence for every reported PR-F weakness plus every independent QCHECK finding.
+- Exact staged focused acceptance/documentation suite: 49/49 passed.
+- Full API: 372/372 passed in 133.31 seconds; Ruff passed. Exact amended mypy passed across 57 source files after the nested-manifest test type was corrected.
+- Full web from the same PR-R2 product tree: 540/540 passed; lint, typecheck, and production build passed.
+- ML: 46 passed, 4 skipped. E2E TypeScript, Bash syntax, and staged/working whitespace checks passed.
+- Warm live score gate before source-integrity-only amendments: 27/27 passed in 1.7 minutes under the explicit candidate Compose file and `pwa-demo` project. Runtime was restored to normal.
+- Production dirty-source refusal occurred before gate/manifest; contract mode remained visibly v2-test and non-ACCEPTED.
+
+### Residual risks and evidence boundary
+
+- The manifest is unsigned evidence from a trusted operator host; it does not attest a malicious host OS/toolchain. Production nevertheless pins `/usr/bin/git`, `/usr/bin/make`, canonical GitHub origin URLs, candidate Compose/project, and canonical judge endpoints.
+- The warm live run is pre-merge rehearsal. Exact-merged-SHA Gate A1 remains pending the PR merge and a clean production-mode acceptance run.
+- No true-cold proof exists because the separately authorized destructive volume reset was not requested.
+- The unrelated `trend-paper-db` continues to own host port 5433; rehearsals use the supported `TSDB_PORT=15433` mapping and do not alter that user service.
+
+Verdict: approve the staged PR-R2 candidate for commit and the normal PR lifecycle.

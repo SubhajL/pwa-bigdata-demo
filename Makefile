@@ -1,6 +1,10 @@
 # Demo operator targets (PR-17 / slice S-D). Thin wrappers over the compose stack + demo scripts,
 # so a second operator can run the scored demo without knowing the internals.
-COMPOSE := docker compose -f infra/docker-compose.yml
+COMPOSE_FILE_PATH ?= $(CURDIR)/infra/docker-compose.yml
+override COMPOSE_FILE_PATH := $(abspath $(COMPOSE_FILE_PATH))
+COMPOSE_PROJECT_NAME ?= pwa-demo
+export COMPOSE_FILE_PATH COMPOSE_PROJECT_NAME
+COMPOSE := docker compose --file $(COMPOSE_FILE_PATH) --project-name $(COMPOSE_PROJECT_NAME)
 
 .PHONY: help demo-up demo-down demo-preflight demo-reconnect demo-scenario e2e-setup demo-e2e demo-acceptance-3x demo-e2e-cold
 
@@ -35,8 +39,7 @@ demo-e2e: ## the score gate: preflight, then run the 16-item Playwright E2E; res
 demo-acceptance-3x: ## Gate A1: THREE consecutive score-gate runs + exact-SHA evidence manifest (warm; volumes preserved)
 	RUNS=3 scripts/demo-acceptance.sh
 
-# ONE recipe line, and the confirmation guard lives INSIDE volume-reset.sh: a guard in a
-# separate recipe line is bypassable by `make -i` / MAKEFLAGS=-i, which ignores a failed
-# line and runs the next one. `&&` also stops the acceptance run when the reset refuses.
+# The acceptance runner owns the confirmed reset and the gate in ONE execution. There is no
+# caller-minted capability between them, and its internal guard remains immune to `make -i`.
 demo-e2e-cold: ## TRUE cold acceptance: DESTROYS Docker volumes first — refuses without CONFIRM_VOLUME_RESET=1
-	scripts/lib/volume-reset.sh && RUNS=1 ACCEPTANCE_MODE=cold scripts/demo-acceptance.sh
+	RUNS=1 ACCEPTANCE_MODE=cold scripts/demo-acceptance.sh
