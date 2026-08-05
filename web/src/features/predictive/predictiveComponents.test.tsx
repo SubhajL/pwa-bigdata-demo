@@ -106,6 +106,8 @@ describe("WorklistTable", () => {
     expect(
       within(within(second).getByTestId("worklist-health-cell")).getByText("62"),
     ).toBeInTheDocument();
+    expect(within(first).getByTestId("worklist-health-visible").textContent).toBe("30");
+    expect(within(second).getByTestId("worklist-health-visible").textContent).toBe("62");
   });
 });
 
@@ -134,6 +136,12 @@ describe("RcaPanel", () => {
     const bars = within(screen.getByTestId("rca-panel")).getAllByRole("listitem");
     // Ranked order AND identity: the first bar IS the top attributed signal.
     expect(bars.map((b) => b.getAttribute("data-signal"))).toEqual(["vibration", "pressure_bar"]);
+    expect(within(bars[0]).getByTestId("rca-signal-label").textContent).toBe(
+      "การสั่นสะเทือน · Vibration",
+    );
+    expect(within(bars[1]).getByTestId("rca-signal-label").textContent).toBe(
+      "ความดัน · Pressure",
+    );
   });
 });
 
@@ -149,14 +157,11 @@ describe("ModelCard", () => {
     expect(within(card).getByText("SIMULATED")).toBeInTheDocument();
   });
 
-  it("exposes the loaded artifact hash for literal DOM↔API comparison (item 3.1 provenance)", () => {
+  it("shows the complete loaded artifact hash for literal human comparison (item 3.1 provenance)", () => {
     render(<ModelCard card={CARD} />);
     const sha = screen.getByTestId("model-artifact-sha");
-    // The FULL hash rides a machine-readable attribute — the E2E compares it to the API
-    // string-for-string, so no truncation/formatting may touch it.
     expect(sha).toHaveAttribute("data-sha256", CARD.artifact_sha256);
-    // A human still sees a recognizable prefix on screen.
-    expect(sha).toHaveTextContent(CARD.artifact_sha256.slice(0, 12));
+    expect(sha.textContent).toBe(CARD.artifact_sha256);
   });
 
   it("distinguishes loading from unavailable when there is no card", () => {
@@ -220,9 +225,11 @@ describe("FeedbackPanel", () => {
       id: 42, asset_id: "P-2", verdict: "confirmed", created_at: "2026-07-31T01:00:00Z", stored: true,
     });
     render(<FeedbackPanel asset="P-2" />);
+    const marker = "e2e-ui-component-marker";
+    fireEvent.change(screen.getByLabelText("บันทึกเพิ่มเติม"), { target: { value: marker } });
     await act(async () => { fireEvent.submit(screen.getByRole("button", { name: /ส่งผลการตรวจสอบ/ }).closest("form")!); });
     expect(vi.mocked(submitFeedback)).toHaveBeenCalledWith(
-      expect.objectContaining({ asset_id: "P-2", verdict: "confirmed" }),
+      expect.objectContaining({ asset_id: "P-2", verdict: "confirmed", note: marker }),
     );
     const ack = screen.getByTestId("feedback-ack");
     expect(ack).toHaveTextContent("P-2"); // the ack names the device it belongs to

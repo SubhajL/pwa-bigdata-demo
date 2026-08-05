@@ -106,6 +106,16 @@ def test_coverage_keeps_gate_a1_evidence_boundary() -> None:
         )
 
 
+def test_runbook_requires_full_artifact_digest_comparison() -> None:
+    """The item-3.1 operator step must expose the complete digest comparison."""
+    runbook = _read(RUNBOOK)
+    row = re.search(r"^\| 3\.1 \(5\) \|.*$", runbook, re.M)
+    assert row is not None, "the runbook lost its item-3.1 operator row"
+    assert "Artifact SHA-256 · model.pkl" in row.group(0)
+    assert "sha256sum" in row.group(0)
+    assert "64" in row.group(0), "the runbook no longer requires all digest characters"
+
+
 def test_no_real_customer_claim() -> None:
     """Seeded/simulated impact customers are never presented as real ones."""
     sources = [(p, _read(p)) for p in _CUSTOMER_CLAIM_FILES]

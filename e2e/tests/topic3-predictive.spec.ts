@@ -29,11 +29,10 @@ test("3.1b — the artifact hash on screen IS the hash the API serves (provenanc
   expect(model.artifact_sha256).toMatch(/^[0-9a-f]{64}$/);
   expect(model.artifact_sha256).not.toBe(model.data_sha256); // artifact ≠ training-data hash
   await page.goto("/predictive");
-  // String-for-string equality with the API — the DOM exposes the full untruncated hash.
+  // String-for-string equality with the API in the text a judge can literally compare.
   const sha = page.getByTestId("model-artifact-sha");
   await expect(sha).toHaveAttribute("data-sha256", model.artifact_sha256);
-  // …and the judge-VISIBLE text is a recognizable prefix of that same hash.
-  await expect(sha).toContainText(model.artifact_sha256.slice(0, 12));
+  await expect(sha).toHaveText(model.artifact_sha256);
 });
 
 test("3.2 — Health & PTTF differ across two datasets, in the DOM the judge reads (item 3.2)", async ({ page }) => {
@@ -119,18 +118,31 @@ test("3.3 — a device's model health status is reflected on the twin (model→t
 });
 
 test("3.4 — the Feedback Loop API persists and is exposed in Swagger (item 3.4)", async ({ page }) => {
-  await page.goto("/predictive");
-  await expect(page.getByTestId("worklist")).toBeVisible();
-  await page.getByRole("button", { name: /ส่งผลการตรวจสอบ/ }).click();
-  const ack = page.getByTestId("feedback-ack");
-  await expect(ack).toBeVisible();
-  // Persistence evidence is the DB-RETURNED id (from INSERT … RETURNING), not the constant
-  // `stored` default: a real positive `id #N` proves the row was written, not merely accepted.
-  await expect(ack).toContainText(/id #[1-9]\d*/);
-  await expect(ack).toContainText("stored=true");
-  // …and the endpoint a judge exercises in Swagger is documented.
-  const spec = await apiJson<{ paths: Record<string, unknown> }>("/openapi.json");
-  expect(spec.paths["/api/feedback"]).toBeTruthy();
+  const marker = `e2e-ui-${Date.now()}`;
+  try {
+    await page.goto("/predictive");
+    await expect(page.getByTestId("worklist")).toBeVisible();
+    await page.getByLabel("บันทึกเพิ่มเติม").fill(marker);
+    await page.getByRole("button", { name: /ส่งผลการตรวจสอบ/ }).click();
+    const ack = page.getByTestId("feedback-ack");
+    await expect(ack).toBeVisible();
+    await expect(ack).toContainText("stored=true");
+    const shown = (await ack.innerText()).match(/id #(\d+)/);
+    expect(shown, "the on-screen ack must show the DB-returned id").not.toBeNull();
+    const uiId = Number(shown![1]);
+    expect(uiId).toBeGreaterThan(0);
+    expect(feedbackCountByNote(marker)).toBe(1);
+    expect(feedbackIdByNote(marker)).toBe(uiId);
+
+    // The endpoint a judge exercises in Swagger remains documented.
+    const spec = await apiJson<{ paths: Record<string, unknown> }>("/openapi.json");
+    expect(spec.paths["/api/feedback"]).toBeTruthy();
+    expect(deleteFeedbackByNote(marker)).toBe(1);
+  } finally {
+    // Exact marker-only cleanup, even when navigation/assertion fails mid-test.
+    deleteFeedbackByNote(marker);
+    expect(feedbackCountByNote(marker)).toBe(0);
+  }
 });
 
 test("3.4b — a judge drives Swagger Try it out and the row PERSISTS in the database (item 3.4)", async ({ page }) => {
@@ -203,13 +215,13 @@ test("3.5 — the worklist is ranked worst-health first, and the rows a judge re
       if (api.length !== 3 || (await rows.count()) < 3) return false;
       for (let i = 0; i < 3; i += 1) {
         const row = rows.nth(i);
-        const [rank, asset, health, rankCell, assetButton, healthCell] = await Promise.all([
+        const [rank, asset, health, rankCell, assetButton, healthText] = await Promise.all([
           row.getAttribute("data-rank"),
           row.getAttribute("data-asset"),
           row.getAttribute("data-health-score"),
           row.locator("td").first().innerText(),
           row.getByRole("button").innerText(),
-          row.getByTestId("worklist-health-cell").innerText(),
+          row.getByTestId("worklist-health-visible").innerText(),
         ]);
         // formatInt's half-away-from-zero rounding, replicated for the visible numeral.
         const vInt = (v: number): string => {
@@ -225,7 +237,7 @@ test("3.5 — the worklist is ranked worst-health first, and the rows a judge re
           // MEDIUM: the WorklistRow→HealthMeter seam was otherwise unproven live).
           rankCell.trim() !== String(api[i].rank) ||
           assetButton.trim() !== api[i].asset_id ||
-          !healthCell.includes(vInt(api[i].health_score))
+          healthText.trim() !== vInt(api[i].health_score)
         ) {
           return false;
         }
@@ -260,6 +272,15 @@ test("3.6b — two different induced anomalies produce two different TOP rendere
   interface Rca { contributions: { signal: string; contribution: number }[] }
   const apiTop = async (): Promise<string | undefined> =>
     (await apiJson<Rca>("/api/rca/P-2")).contributions[0]?.signal;
+  const expectLabelFullyRendered = async (label: ReturnType<typeof page.getByTestId>): Promise<void> => {
+    expect(
+      await label.evaluate((element) => {
+        const style = window.getComputedStyle(element);
+        return style.textOverflow !== "ellipsis" && element.scrollWidth <= element.clientWidth;
+      }),
+      "the complete visible RCA label must render without clipping or ellipsis",
+    ).toBe(true);
+  };
 
   try {
     await postScenario("anomaly", "P-2"); // worn trajectory + above-band vibration
@@ -270,6 +291,9 @@ test("3.6b — two different induced anomalies produce two different TOP rendere
     await page.getByRole("button", { name: "P-2" }).click();
     const topBar = page.getByTestId("rca-panel").locator("[data-signal]").first();
     await expect(topBar).toHaveAttribute("data-signal", "vibration");
+    const vibrationLabel = topBar.getByTestId("rca-signal-label");
+    await expect(vibrationLabel).toHaveText("การสั่นสะเทือน · Vibration");
+    await expectLabelFullyRendered(vibrationLabel);
 
     await postScenario("bearing_anomaly", "P-2"); // healthy baseline, hot bearing
     await pollUntil(async () => (await apiTop()) === "bearing_temp_c", {
@@ -283,6 +307,9 @@ test("3.6b — two different induced anomalies produce two different TOP rendere
     await page.reload();
     await page.getByRole("button", { name: "P-2" }).click();
     await expect(topBar).toHaveAttribute("data-signal", "bearing_temp_c");
+    const bearingLabel = topBar.getByTestId("rca-signal-label");
+    await expect(bearingLabel).toHaveText("อุณหภูมิลูกปืน · Bearing Temp");
+    await expectLabelFullyRendered(bearingLabel);
   } finally {
     // Restore the suite's warm-state convention UNCONDITIONALLY (both review tiers): a
     // mid-test failure must not leave the serialized shared stack off the documented

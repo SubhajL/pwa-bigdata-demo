@@ -118,7 +118,7 @@ ordered rows.
 
 | # | Trigger | Where to look | Expect | Reset |
 |---|---|---|---|---|
-| 3.1 (5) | — | Trained-Model card | **Ridge**, `alpha`, StandardScaler, MAE **≪** baseline (real, not the mockup's Random Forest) | — |
+| 3.1 (5) | Run `docker compose -f infra/docker-compose.yml exec -T api sha256sum /srv/artifacts/model.pkl` | Trained-Model card → **Artifact SHA-256 · model.pkl** | **Ridge**, `alpha`, StandardScaler, MAE **≪** baseline, and all **64** visible digest characters exactly match `sha256sum` | — |
 | 3.2 (5) | — | Health Score บนชุดข้อมูล 2 ชุด | Dataset A (healthy) **≫** Dataset B (degraded) — e.g. 99.5 vs 30.1 | — |
 | 3.3 (5) | — | a device's health status ↔ its twin symbol | the twin reflects the model's health (bound ≤ 30s, measured in `api/tests/test_scoring_cycle.py`) | — |
 | 3.4 (5) | Swagger `/docs` → `POST /api/feedback` → **Try it out**, or the on-screen form → **ส่งผลการตรวจสอบ** | the ack | **200** with `stored: true` + an `id` (proof it persisted) | — |

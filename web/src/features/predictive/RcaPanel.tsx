@@ -39,9 +39,12 @@ export function RcaPanel({ asset, rca }: RcaPanelProps): JSX.Element {
             <li
               key={bar.signal}
               data-signal={bar.signal}
-              className="grid grid-cols-[9rem_1fr_3.5rem] items-center gap-3"
+              className="grid grid-cols-[minmax(9rem,12rem)_minmax(0,1fr)_3.5rem] items-center gap-3"
             >
-              <span className="truncate text-dense text-on-surface-variant">
+              <span
+                data-testid="rca-signal-label"
+                className="break-words text-dense leading-snug text-on-surface-variant"
+              >
                 {SIGNAL_LABEL_TH[bar.signal]}
               </span>
               <div className="h-3 overflow-hidden rounded-pill bg-surface-container">

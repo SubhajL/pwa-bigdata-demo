@@ -16,9 +16,10 @@ including the demo-director transitions) protects the strongest live paths, incl
 band `warning` → model `critical` → recovery sequence and the literal operator/DOM oracles for
 topic ๓; their exact-merged-SHA acceptance remains Gate A1's.
 
-**Gate A1 pending.** PR-D delivers the loaded-model artifact SHA and displayed dataset-value
-oracles for 3.1–3.2 (API/UI/preflight share one hash of the exact loaded bytes; tiles expose both
-the literal served values and the judge-visible numbers); their exact-SHA acceptance run remains
+**Gate A1 pending.** PR-D delivers the complete judge-visible loaded-model artifact SHA and
+displayed dataset-value oracles for 3.1–3.2 (API/UI/preflight share one hash of the exact loaded
+bytes; the card exposes all 64 digest characters and tiles expose both the literal served values
+and the judge-visible numbers); their exact-SHA acceptance run remains
 Gate A1's. PR-E delivers Swagger Try-it-out persistence (with DB-side verification and harness
 cleanup), first-three DOM/API worklist correspondence, and induced rendered RCA variation for
 3.4–3.6. Until Gate A1 runs at one exact merged SHA, this matrix must not be promoted to a
@@ -40,7 +41,7 @@ complete E2E-readiness claim.
 | 2.3 | Pump anomaly + SEC tooltip (10) | ✅ (induced anomaly + on-screen recomputable derivation) | PR-7, PR-C | `topic2 2.3` + `scenario anomaly` |
 | 2.4 | Pressure drop → pipe highlight + affected customers (10) | ✅ (drop < 2.0 bar) | PR-7 | `topic2 2.4` |
 | 2.5 | Source code: config + ≥3 components (5) | ✅ | PR-0 → PR-7 → PR-9 | `topic2 2.5` |
-| 3.1 | Trained model file + algorithm + params (5) | ◑ built/wired; loaded-artifact SHA oracle delivered (PR-D); exact-SHA acceptance pending Gate A1 | PR-4, `/api/model` PR-9 | `topic3 3.1` + `3.1b` |
+| 3.1 | Trained model file + algorithm + params (5) | ◑ built/wired; complete visible loaded-artifact SHA oracle delivered (PR-D); exact-SHA acceptance pending Gate A1 | PR-4, `/api/model` PR-9 | `topic3 3.1` + `3.1b` |
 | 3.2 | Health/PTTF vary across ≥2 datasets (5) | ◑ built/wired; displayed dataset-value oracle delivered (PR-D); exact-SHA acceptance pending Gate A1 | PR-4, `/api/model` PR-9 | `topic3 3.2` (DOM↔API literal + visible) |
 | 3.3 | Health<threshold → twin change ≤30s (5) | ✅ bound in `test_scoring_cycle`; browser-observed in `scenario-transitions` | PR-4/PR-5/PR-7, #30 | `topic3 3.3` |
 | 3.4 | Feedback API via Swagger, persists (5) | ◑ built/wired; literal Swagger Try-it-out + DB persistence oracle delivered (PR-E); exact-SHA acceptance pending Gate A1 | PR-5, screen PR-9 | `topic3 3.4` + `3.4b` (Swagger↔DB row identity) |

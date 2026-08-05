@@ -16,6 +16,7 @@ export interface HealthMeterProps {
   readonly value: number | null;
   readonly status: HealthStatus;
   readonly className?: string;
+  readonly valueTestId?: string;
 }
 
 /**
@@ -23,11 +24,11 @@ export interface HealthMeterProps {
  * width is the value and whose colour is the status band. `null` renders an em-dash and an empty
  * track (a `nodata` device shows nothing, not a full or zero bar that reads as a real score).
  */
-export function HealthMeter({ value, status, className }: HealthMeterProps): JSX.Element {
+export function HealthMeter({ value, status, className, valueTestId }: HealthMeterProps): JSX.Element {
   const pct = value == null ? 0 : Math.max(0, Math.min(100, value));
   return (
     <div className={cn("flex items-center gap-3", className)}>
-      <span className="w-8 text-sm font-semibold text-on-surface">
+      <span data-testid={valueTestId} className="w-8 text-sm font-semibold text-on-surface">
         <Num kind="int" value={value} />
       </span>
       <div className="h-1.5 flex-1 overflow-hidden rounded-pill bg-surface-container">
