@@ -120,26 +120,26 @@ def test_no_real_customer_claim() -> None:
 
 
 def test_preflight_verifies_served_artifact_provenance() -> None:
-    """Preflight must compare `/api/model`'s `artifact_sha256` to the bytes of the artifact
-    inside the running image (PR-D, item 3.1): one hash across API, UI, and this gate.
-
-    Deliberately matched against NON-comment lines only, and against the load-bearing
-    constructions rather than bare keywords — a deleted probe with its comment left behind
-    must fail here (review-workflow HIGH, 2026-08-05)."""
+    """The provenance probe (PR-D, item 3.1) lives in an extracted, behaviorally-tested
+    script since PR-F: this test pins the load-bearing constructions of THAT script on
+    non-comment lines, and that the preflight actually delegates to it — a deleted probe
+    with its comment left behind must fail here (review-workflow HIGH, 2026-08-05). The
+    five behavioral cases run in `test_acceptance_harness.py`."""
+    probe_path = REPO / "scripts" / "lib" / "artifact-provenance-probe.sh"
     code = "\n".join(
-        line for line in _read(PREFLIGHT).splitlines() if not line.lstrip().startswith("#")
+        line for line in _read(probe_path).splitlines() if not line.lstrip().startswith("#")
     )
     # (1) the served hash is extracted from /api/model json…
     assert re.search(r"api_sha=\$\([\s\S]{0,200}artifact_sha256", code), (
-        "preflight no longer extracts artifact_sha256 from /api/model"
+        "the probe no longer extracts artifact_sha256 from /api/model"
     )
     # (2) …a failing producer clears the value instead of keeping its stdout…
     assert re.search(r"\|\|\s*api_sha=\"\"", code) and re.search(r"\|\|\s*img_sha=\"\"", code), (
-        "preflight must clear a digest whose producer exited non-zero (no `|| true` slop)"
+        "the probe must clear a digest whose producer exited non-zero (no `|| true` slop)"
     )
     # (3) …the in-container bytes are hashed (MODEL_PATH-aware, model.pkl fallback)…
     assert re.search(r"img_sha=\$\([\s\S]{0,400}hashlib\.sha256", code), (
-        "preflight no longer hashes the artifact inside the running api container"
+        "the probe no longer hashes the artifact inside the running api container"
     )
     assert re.search(r"img_sha=\$\([\s\S]{0,400}model\.pkl", code), (
         "the in-container hash lost its /srv/artifacts/model.pkl fallback path"
@@ -147,21 +147,21 @@ def test_preflight_verifies_served_artifact_provenance() -> None:
     assert "MODEL_PATH" in code, (
         "the in-container hash must honor the same MODEL_PATH override the API resolver does"
     )
-    # (4) …both strings are validated as real digests before any verdict, with WHOLE-string
-    # anchors — an unanchored `=~ [0-9a-f]{64}` accepts a noisy multi-line producer whose
-    # output merely CONTAINS a digest (g-check round-4 LOW)…
+    # (4) …both strings are validated as anchored whole-string 64-hex digests…
     assert code.count("=~ ^[0-9a-f]{64}$") >= 2, (
-        "preflight must validate BOTH values as anchored whole-string 64-hex digests"
+        "the probe must validate BOTH values as anchored whole-string 64-hex digests"
     )
-    # (5) …the verdict is a REAL equality between the two captured digests (an `elif true`
-    # mutation must fail here, not just delete-the-probe mutations; workflow M round 2)…
+    # (5) …and the verdict is a REAL equality between the two captured digests.
     assert re.search(r'\[ "\$api_sha" = "\$img_sha" \]', code), (
         "the match verdict must literally compare $api_sha to $img_sha"
     )
-    # (6) …and the mismatch branch actually fails the gate.
+    # (6) The preflight delegates to the probe and fails the gate on ANY non-zero exit.
+    preflight_code = "\n".join(
+        line for line in _read(PREFLIGHT).splitlines() if not line.lstrip().startswith("#")
+    )
     assert re.search(
-        r"!= image file[\s\S]{0,120}FAILED=1", code
-    ), "the mismatch verdict must set FAILED=1"
+        r"artifact-provenance-probe\.sh[\s\S]{0,80}\|\|\s*FAILED=1", preflight_code
+    ), "the preflight must run the extracted probe and set FAILED=1 on failure"
 
 
 def test_runbook_names_every_scenario_button_the_panel_renders() -> None:

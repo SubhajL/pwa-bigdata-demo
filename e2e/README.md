@@ -11,6 +11,9 @@ make e2e-setup                       # installs Playwright + chromium
 
 # every time
 make demo-e2e                        # preflight the stack, then run all 16 items (resets the sim on exit)
+make demo-acceptance-3x              # Gate A1: 3 consecutive gate runs + exact-SHA evidence manifest
+make demo-e2e-cold CONFIRM_VOLUME_RESET=1  # true cold acceptance — DESTROYS volumes; refuses without the flag
+make demo-down CONFIRM_VOLUME_RESET=1      # same guard: volume removal has ONE entry point
 # or, if the stack is already up:
 cd e2e && pnpm test
 cd e2e && pnpm test tests/topic1-pipeline.spec.ts   # one topic
