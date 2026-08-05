@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import math
 import struct
@@ -38,6 +39,22 @@ SOURCE_CRS = "EPSG:32647"
 OUTPUT_CRS = "EPSG:4326"
 #: The exact PROJCS name the delivered .prj must carry; anything else is a hard failure.
 SOURCE_PROJCS = "WGS_1984_UTM_Zone_47N"
+
+#: Sidecars read as ONE in-memory snapshot; the first four are mandatory, `.cpg` optional.
+REQUIRED_SUFFIXES: frozenset[str] = frozenset({".shp", ".dbf", ".shx", ".prj"})
+SIDECAR_SUFFIXES: tuple[str, ...] = (".shp", ".dbf", ".shx", ".prj", ".cpg")
+
+#: The one PWA branch code every record of the audited Rayong source carries
+#: (docs/data/pipe-ry-provenance.md §Source). Enforced before a REAL manifest is emitted;
+#: MUST equal app.models.AUDITED_BRANCH_CODE (cross-checked in test_build_pipe_gis.py).
+AUDITED_BRANCH_CODE = "5531021"
+
+#: The delivered dataset's audited feature counts (docs/data/pipe-ry-provenance.md). The
+#: CLI defaults `--expect-full/--expect-focus` to these, so even the bare documented build
+#: command hard-fails a partial or wrong export (PR-R3 QCHECK round 3 — the Makefile path
+#: was pinned but the direct CLI path was not). Override only for a re-audited source.
+AUDITED_FULL_COUNT = 9273
+AUDITED_FOCUS_COUNT = 19
 
 FULL_SCOPE_FILE = "network.geojson"
 FOCUS_SCOPE_FILE = "map_ta_phut.geojson"
@@ -134,31 +151,67 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def inspect_source(shp_path: Path) -> SourceAudit:
+@dataclass(frozen=True)
+class SourceSnapshot:
+    """The source shapefile set read into memory ONCE.
+
+    The bytes hashed for the manifest and the bytes pyshp converts to GeoJSON are the
+    SAME bytes — a OneDrive re-sync between an audit pass and a geometry pass can no
+    longer make the manifest name one version of the source while the build converts
+    another (PR-R3 finding 4). Keyed by sidecar filename (e.g. `PIPE RY.shp`)."""
+
+    shp_path: Path
+    files: dict[str, bytes]
+
+    def _bytes(self, suffix: str) -> bytes:
+        return self.files[self.shp_path.with_suffix(suffix).name]
+
+    @property
+    def prj_text(self) -> str:
+        return self._bytes(".prj").decode("utf-8", errors="replace")
+
+
+def load_source_snapshot(shp_path: Path) -> SourceSnapshot:
+    """Read every sidecar's bytes ONCE into memory.
+
+    Raises:
+        GisBuildError: a missing required sidecar or an unreadable file.
+    """
+    files: dict[str, bytes] = {}
+    for suffix in SIDECAR_SUFFIXES:
+        sidecar = shp_path.with_suffix(suffix)
+        if not sidecar.exists():
+            if suffix in REQUIRED_SUFFIXES:
+                raise GisBuildError(f"missing required sidecar {sidecar.name!r} ({suffix})")
+            continue
+        try:
+            files[sidecar.name] = sidecar.read_bytes()
+        except OSError as error:
+            raise GisBuildError(f"unreadable sidecar {sidecar.name!r}: {error}") from error
+    return SourceSnapshot(shp_path=shp_path, files=files)
+
+
+def inspect_source(source: Path | SourceSnapshot) -> SourceAudit:
     """Audit the shapefile set: sidecars, hashes, geometry type, count, fields, CRS.
+
+    Hashes are computed from the SNAPSHOT bytes, so they describe exactly the bytes the
+    geometry pass converts.
 
     Raises:
         GisBuildError: missing sidecar, unreadable set, or a CRS other than UTM 47N.
     """
-    required = {".shp", ".dbf", ".shx", ".prj"}
-    files: dict[str, dict[str, Any]] = {}
-    for suffix in sorted(required | {".cpg"}):
-        sidecar = shp_path.with_suffix(suffix)
-        if not sidecar.exists():
-            if suffix in required:
-                raise GisBuildError(f"missing required sidecar {sidecar.name!r} ({suffix})")
-            continue
-        files[sidecar.name] = {
-            "sha256": sha256_file(sidecar), "bytes": sidecar.stat().st_size,
-        }
-    prj_text = shp_path.with_suffix(".prj").read_text(encoding="utf-8", errors="replace")
-    if SOURCE_PROJCS not in prj_text:
+    snapshot = source if isinstance(source, SourceSnapshot) else load_source_snapshot(source)
+    files = {
+        name: {"sha256": _sha256_bytes(data), "bytes": len(data)}
+        for name, data in snapshot.files.items()
+    }
+    if SOURCE_PROJCS not in snapshot.prj_text:
         raise GisBuildError(
             f"unexpected CRS: .prj does not name {SOURCE_PROJCS} ({SOURCE_CRS}); refusing"
         )
-    with _open_source(shp_path) as rdr:
+    with _reader_from_snapshot(snapshot) as rdr:
         return SourceAudit(
-            source_dir=str(shp_path.parent),
+            source_dir=str(snapshot.shp_path.parent),
             files=files,
             shape_type=str(rdr.shapeTypeName),
             feature_count=len(rdr),
@@ -167,20 +220,34 @@ def inspect_source(shp_path: Path) -> SourceAudit:
         )
 
 
-def _open_source(shp_path: Path) -> Any:
-    """A pyshp Reader over the source, with low-level failures made honest.
+def _sha256_bytes(data: bytes) -> str:
+    """Hex SHA-256 of an in-memory buffer."""
+    return hashlib.sha256(data).hexdigest()
 
-    A truncated or partially-synced file surfaces from pyshp as `struct.error` or a
-    generic exception; the operator must see one GisBuildError line and exit code 1,
-    not a traceback (QCHECK 2026-08-05).
+
+def _reader_from_snapshot(snapshot: SourceSnapshot) -> Any:
+    """A pyshp Reader over the in-memory snapshot, with low-level failures made honest.
+
+    Feeding pyshp the snapshot's byte buffers (not the paths) is what closes the audit /
+    convert race: no second disk read can occur. A truncated or partially-synced file
+    surfaces as `struct.error` or a generic exception; the operator must see one
+    GisBuildError line and exit code 1, not a traceback (QCHECK 2026-08-05).
 
     Raises:
         GisBuildError: the source is unreadable or corrupt.
     """
     try:
-        return shapefile.Reader(str(shp_path), encoding="utf-8", encodingErrors="replace")
-    except (OSError, ValueError, struct.error, shapefile.ShapefileException) as error:
-        raise GisBuildError(f"unreadable source {shp_path.name!r}: {error}") from error
+        return shapefile.Reader(
+            shp=io.BytesIO(snapshot._bytes(".shp")),
+            dbf=io.BytesIO(snapshot._bytes(".dbf")),
+            shx=io.BytesIO(snapshot._bytes(".shx")),
+            encoding="utf-8",
+            encodingErrors="replace",
+        )
+    except (OSError, ValueError, struct.error, shapefile.ShapefileException, KeyError) as error:
+        raise GisBuildError(
+            f"unreadable source {snapshot.shp_path.name!r}: {error}"
+        ) from error
 
 
 def _shape_parts(shape: Any) -> tuple[tuple[tuple[float, float], ...], ...]:
@@ -192,21 +259,22 @@ def _shape_parts(shape: Any) -> tuple[tuple[tuple[float, float], ...], ...]:
     )
 
 
-def read_source_features(shp_path: Path) -> list[SourceFeature]:
+def read_source_features(source: Path | SourceSnapshot) -> list[SourceFeature]:
     """Read every feature; hard-fail on duplicate PIPE_ID or non-polyline shapes.
 
     Raises:
         GisBuildError: duplicate pipe id, missing pipe id, or a non-polyline shape.
     """
+    snapshot = source if isinstance(source, SourceSnapshot) else load_source_snapshot(source)
     features: list[SourceFeature] = []
     seen: dict[int, int] = {}
-    with _open_source(shp_path) as rdr:
+    with _reader_from_snapshot(snapshot) as rdr:
         names = [field[0] for field in rdr.fields[1:]]
         try:
             shape_records = list(rdr.iterShapeRecords())
         except (OSError, ValueError, struct.error, shapefile.ShapefileException) as error:
             raise GisBuildError(
-                f"unreadable or corrupt source {shp_path.name!r}: {error}"
+                f"unreadable or corrupt source {snapshot.shp_path.name!r}: {error}"
             ) from error
         for index, shape_record in enumerate(shape_records):
             if shape_record.shape.shapeTypeName != "POLYLINE":
@@ -243,6 +311,46 @@ def _pipe_id(raw: Mapping[str, Any], index: int) -> int:
     if isinstance(value, float) and not value.is_integer():
         raise GisBuildError(f"feature {index} has a non-integral PIPE_ID {value!r}")
     return int(value)
+
+
+def _as_code(value: Any) -> str:
+    """A branch/identity code as text, normalising DBF numerics (5531021.0 -> "5531021")
+    so a numeric-typed column compares equal to the audited string."""
+    if isinstance(value, bool):
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    if isinstance(value, int):
+        return str(value)
+    return str(value or "").strip()
+
+
+def verify_source_identity(features: Sequence[SourceFeature]) -> None:
+    """Refuse to label a shapefile the audited REAL Rayong dataset unless it carries the
+    branch's fingerprint: every record on PWA branch code 5531021, and `globalId` present
+    and unique across all features. A wrong export must fail HERE (PR-R3 finding 2), not
+    become judge-facing REAL geometry/attributes.
+
+    Raises:
+        GisBuildError: a record on another branch, or a missing/duplicate globalId.
+    """
+    seen_global: dict[str, int] = {}
+    for index, feature in enumerate(features):
+        branch = _as_code(feature.raw.get("pwaCode"))
+        if branch != AUDITED_BRANCH_CODE:
+            raise GisBuildError(
+                f"feature {index} carries PWA code {branch!r}, not the audited Rayong "
+                f"branch {AUDITED_BRANCH_CODE!r} — wrong source dataset, refusing REAL label"
+            )
+        global_id = str(feature.raw.get("globalId") or "").strip()
+        if not global_id:
+            raise GisBuildError(f"feature {index} has no globalId — cannot verify identity")
+        if global_id in seen_global:
+            raise GisBuildError(
+                f"duplicate globalId {global_id!r} at features "
+                f"{seen_global[global_id]} and {index}"
+            )
+        seen_global[global_id] = index
 
 
 def select_map_ta_phut_features(features: Sequence[SourceFeature]) -> list[SourceFeature]:
@@ -471,9 +579,13 @@ def build_manifest(
     datasets: dict[str, dict[str, Any]],
     binding: DemoBinding,
     generated_at: datetime,
+    expect_full: int | None = None,
+    expect_focus: int | None = None,
 ) -> dict[str, Any]:
     """The bundle manifest: schema, source identity, dataset summaries, binding,
-    provenance boundary, and the official energy reference."""
+    provenance boundary, and the official energy reference. `source.audit` records the
+    identity contract the build ENFORCED (branch code, unique globalId, pinned counts),
+    so the API can trust the REAL label (PR-R3 finding 2)."""
     stamp = generated_at.astimezone(UTC).isoformat().replace("+00:00", "Z")
     return {
         "schema_version": SCHEMA_VERSION,
@@ -484,6 +596,12 @@ def build_manifest(
             "output_crs": OUTPUT_CRS,
             "feature_count": audit.feature_count,
             "files": audit.files,
+            "audit": {
+                "branch_code": AUDITED_BRANCH_CODE,
+                "global_id_unique": True,
+                "expected_full": expect_full,
+                "expected_focus": expect_focus,
+            },
         },
         "datasets": datasets,
         "demo_binding": {
@@ -557,16 +675,35 @@ def build_bundle(
     out_dir: Path,
     configured_pipe_id: int | None = None,
     now: datetime | None = None,
+    expect_full: int | None = None,
+    expect_focus: int | None = None,
 ) -> dict[str, Any]:
-    """End-to-end build; returns the written manifest."""
-    audit = inspect_source(shp_path)
-    features = read_source_features(shp_path)
+    """End-to-end build; returns the written manifest.
+
+    The source is read into ONE in-memory snapshot (PR-R3 finding 4), the identity
+    fingerprint is enforced before any REAL geometry is emitted (finding 2), and any
+    pinned counts must match exactly.
+    """
+    snapshot = load_source_snapshot(shp_path)
+    audit = inspect_source(snapshot)
+    features = read_source_features(snapshot)
     if len(features) != audit.feature_count:
         raise GisBuildError(
             f"read {len(features)} features but the source header says "
             f"{audit.feature_count}"
         )
+    verify_source_identity(features)
     focus = select_map_ta_phut_features(features)
+    if expect_full is not None and len(features) != expect_full:
+        raise GisBuildError(
+            f"expected {expect_full} source features but read {len(features)} — "
+            "count contract drift, refusing"
+        )
+    if expect_focus is not None and len(focus) != expect_focus:
+        raise GisBuildError(
+            f"expected {expect_focus} Map Ta Phut focus features but selected "
+            f"{len(focus)} — count contract drift, refusing"
+        )
     transformer = make_transformer()
     full_fc = features_to_collection(features, transformer)
     focus_fc = features_to_collection(focus, transformer)
@@ -575,7 +712,9 @@ def build_bundle(
         "full": _dataset_summary(FULL_SCOPE_FILE, features, full_fc),
         "map-ta-phut": _dataset_summary(FOCUS_SCOPE_FILE, focus, focus_fc),
     }
-    manifest = build_manifest(audit, datasets, binding, now or datetime.now(tz=UTC))
+    manifest = build_manifest(
+        audit, datasets, binding, now or datetime.now(tz=UTC), expect_full, expect_focus
+    )
     return write_bundle(out_dir, full_fc, focus_fc, manifest)
 
 
@@ -588,9 +727,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--bind-pipe-id", type=int, default=None,
         help="bind the demo asset to this source PIPE_ID (default: longest focus pipe)",
     )
+    parser.add_argument(
+        "--expect-full", type=int, default=AUDITED_FULL_COUNT,
+        help=(
+            f"hard-fail unless the source has EXACTLY this many features "
+            f"(default: audited {AUDITED_FULL_COUNT}); override only for a re-audited source"
+        ),
+    )
+    parser.add_argument(
+        "--expect-focus", type=int, default=AUDITED_FOCUS_COUNT,
+        help=(
+            f"hard-fail unless the Map Ta Phut focus has EXACTLY this many features "
+            f"(default: audited {AUDITED_FOCUS_COUNT}); override only for a re-audited source"
+        ),
+    )
     args = parser.parse_args(argv)
     try:
-        manifest = build_bundle(Path(args.source), Path(args.out), args.bind_pipe_id)
+        manifest = build_bundle(
+            Path(args.source),
+            Path(args.out),
+            args.bind_pipe_id,
+            expect_full=args.expect_full,
+            expect_focus=args.expect_focus,
+        )
     except GisBuildError as error:
         print(f"gis build failed: {error}", file=sys.stderr)
         return 1

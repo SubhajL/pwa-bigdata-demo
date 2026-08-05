@@ -47,19 +47,40 @@ def _geojson(pipe_id: int) -> dict[str, Any]:
     }
 
 
+def _feature(pipe_id: int, **props: Any) -> dict[str, Any]:
+    """One GeoJSON feature with ONLY allowlisted properties (PR-R3 finding 1)."""
+    return {
+        "type": "Feature",
+        "properties": {"pipe_id": pipe_id, "pipe_type": "HDPE", **props},
+        "geometry": {"type": "LineString", "coordinates": [[101.19, 12.68], [101.2, 12.69]]},
+    }
+
+
+def _collection(features: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"type": "FeatureCollection", "features": features}
+
+
+#: The bound pipe (id 2) appears in BOTH scopes with IDENTICAL properties; the full scope
+#: also carries an unbound pipe (id 1). The binding therefore resolves to exactly one
+#: feature per scope — the consistency PR-R3 finding 3 enforces at load.
+_BOUND_PROPERTIES: dict[str, Any] = {"pipe_id": 2, "pipe_type": "HDPE", "asset_code": "AC-2"}
+
+
 def _write_valid_bundle(dir_: pathlib.Path) -> dict[str, Any]:
     """A minimal, internally consistent bundle; returns the manifest dict."""
     dir_.mkdir(parents=True, exist_ok=True)
+    bound = _feature(2, asset_code="AC-2")
+    collections = {
+        "full": _collection([_feature(1, asset_code=None), bound]),
+        "map-ta-phut": _collection([bound]),
+    }
     datasets: dict[str, dict[str, Any]] = {}
-    for scope, name, pipe_id in (
-        ("full", "network.geojson", 1),
-        ("map-ta-phut", "map_ta_phut.geojson", 2),
-    ):
-        body = json.dumps(_geojson(pipe_id), ensure_ascii=False).encode("utf-8")
+    for scope, name in (("full", "network.geojson"), ("map-ta-phut", "map_ta_phut.geojson")):
+        body = json.dumps(collections[scope], ensure_ascii=False).encode("utf-8")
         (dir_ / name).write_bytes(body)
         datasets[scope] = {
             "file": name,
-            "feature_count": 1,
+            "feature_count": len(collections[scope]["features"]),
             "bounds_wgs84": [101.19, 12.68, 101.2, 12.69],
             "length_m": 1234.5,
             "sha256": hashlib.sha256(body).hexdigest(),
@@ -74,15 +95,21 @@ def _write_valid_bundle(dir_: pathlib.Path) -> dict[str, Any]:
             "output_crs": "EPSG:4326",
             "feature_count": 2,
             "files": {"PIPE RY.shp": {"sha256": "ab" * 32, "bytes": 10}},
+            "audit": {
+                "branch_code": "5531021",
+                "global_id_unique": True,
+                "expected_full": None,
+                "expected_focus": None,
+            },
         },
         "datasets": datasets,
         "demo_binding": {
             "scenario_asset_id": "P-2",
-            "pipe_id": 1,
+            "pipe_id": 2,
             "rule": "longest Map Ta Phut focus pipe, ties broken by lowest pipe id",
             "midpoint_wgs84": [101.195, 12.685],
             "placement": "SIMULATED",
-            "properties": {"pipe_id": 1, "pipe_type": "HDPE", "asset_code": None},
+            "properties": dict(_BOUND_PROPERTIES),
         },
         "provenance": {
             "geometry": "REAL",
@@ -283,9 +310,9 @@ def test_gis_hash_valid_but_not_geojson_fails_closed(gis_enabled: pathlib.Path) 
 
 
 def test_gis_feature_count_mismatch_fails_closed(gis_enabled: pathlib.Path) -> None:
-    two = _geojson(1)
-    two["features"].append(_geojson(2)["features"][0])
-    _resign_dataset(gis_enabled, "full", json.dumps(two).encode("utf-8"))  # manifest says 1
+    full = json.loads((gis_enabled / "network.geojson").read_text(encoding="utf-8"))
+    full["features"].append(_feature(99))  # now 3 features; manifest still says 2
+    _resign_dataset(gis_enabled, "full", json.dumps(full).encode("utf-8"))
     with _client() as client:
         assert client.get("/api/twin/gis/manifest").status_code == 503
 
@@ -324,6 +351,192 @@ def test_gis_non_simulated_binding_claim_fails_closed(gis_enabled: pathlib.Path)
 def test_gis_manifest_missing_scope_fails_closed(gis_enabled: pathlib.Path) -> None:
     manifest = json.loads((gis_enabled / "manifest.json").read_text(encoding="utf-8"))
     del manifest["datasets"]["map-ta-phut"]
+    _rewrite_manifest(gis_enabled, manifest)
+    with _client() as client:
+        assert client.get("/api/twin/gis/manifest").status_code == 503
+
+
+# ── PR-R3 finding 1: serve-time property allowlist (data-disclosure boundary) ──────────
+
+
+def test_gis_feature_with_disallowed_property_key_fails_closed(
+    gis_enabled: pathlib.Path,
+) -> None:
+    # A re-signed bundle smuggling a private field (`remark`, an audit id, a customer
+    # column) past the digest must 503 — the manifest hash proves bytes are unchanged,
+    # not that they stayed inside the reviewed public surface.
+    full = json.loads((gis_enabled / "network.geojson").read_text(encoding="utf-8"))
+    full["features"][0]["properties"]["remark"] = "internal DMA note"
+    _resign_dataset(gis_enabled, "full", json.dumps(full).encode("utf-8"))
+    with _client() as client:
+        assert client.get("/api/twin/gis/network?scope=full").status_code == 503
+
+
+def test_gis_feature_with_nonscalar_property_value_fails_closed(
+    gis_enabled: pathlib.Path,
+) -> None:
+    full = json.loads((gis_enabled / "network.geojson").read_text(encoding="utf-8"))
+    full["features"][0]["properties"]["pipe_type"] = {"smuggled": "object"}
+    _resign_dataset(gis_enabled, "full", json.dumps(full).encode("utf-8"))
+    with _client() as client:
+        assert client.get("/api/twin/gis/network?scope=full").status_code == 503
+
+
+def test_gis_feature_level_foreign_member_fails_closed(gis_enabled: pathlib.Path) -> None:
+    # The leak the property allowlist closed must not simply relocate one JSON level out:
+    # a Feature-level `id`/`remark`/`_createdBy` (a source system's internal id) would be
+    # served in the raw bytes (QCHECK round 2).
+    full = json.loads((gis_enabled / "network.geojson").read_text(encoding="utf-8"))
+    full["features"][0]["id"] = {"customer": "Alice"}
+    full["features"][0]["_createdBy"] = "admin@pwa"
+    _resign_dataset(gis_enabled, "full", json.dumps(full).encode("utf-8"))
+    with _client() as client:
+        assert client.get("/api/twin/gis/network?scope=full").status_code == 503
+
+
+def test_gis_geometry_level_foreign_member_fails_closed(gis_enabled: pathlib.Path) -> None:
+    full = json.loads((gis_enabled / "network.geojson").read_text(encoding="utf-8"))
+    full["features"][0]["geometry"]["remark"] = "private geometry metadata"
+    _resign_dataset(gis_enabled, "full", json.dumps(full).encode("utf-8"))
+    with _client() as client:
+        assert client.get("/api/twin/gis/network?scope=full").status_code == 503
+
+
+def test_gis_collection_level_foreign_member_fails_closed(gis_enabled: pathlib.Path) -> None:
+    full = json.loads((gis_enabled / "network.geojson").read_text(encoding="utf-8"))
+    full["internal_audit"] = {"leaked": "operator note"}
+    _resign_dataset(gis_enabled, "full", json.dumps(full).encode("utf-8"))
+    with _client() as client:
+        assert client.get("/api/twin/gis/network?scope=full").status_code == 503
+
+
+@pytest.mark.parametrize(
+    "coordinates",
+    [
+        "a-leaked-string",  # coordinates is not even a list
+        [{"leak": 1}, {"leak": 2}],  # positions are objects, not [lon, lat]
+        [[101.19, 12.68], [101.2, "bad"]],  # non-numeric coordinate
+        [[101.19, 12.68], [True, 12.69]],  # boolean coordinate (bool is a subclass of int)
+        [[101.19, 12.68], [200.0, 12.69]],  # longitude outside WGS84 bounds
+        [[101.19, 12.68]],  # a LineString with only one position
+        [[101.19, 12.68, 5.0], [101.2, 12.69]],  # a third ordinate the builder never emits
+        [[float("nan"), 12.68], [101.2, 12.69]],  # NaN — must 503 via the range comparison
+        [[10**400, 12.68], [101.2, 12.69]],  # googol int — must 503, NOT raise OverflowError
+    ],
+)
+def test_gis_invalid_coordinates_fail_closed(
+    gis_enabled: pathlib.Path, coordinates: Any
+) -> None:
+    # A digest-valid but structurally-invalid geometry must 503, not serve a blank map
+    # (QCHECK round 4: coordinates were only checked to be a list).
+    full = json.loads((gis_enabled / "network.geojson").read_text(encoding="utf-8"))
+    full["features"][0]["geometry"]["coordinates"] = coordinates
+    _resign_dataset(gis_enabled, "full", json.dumps(full).encode("utf-8"))
+    with _client() as client:
+        assert client.get("/api/twin/gis/network?scope=full").status_code == 503, coordinates
+
+
+def test_gis_non_finite_property_value_fails_closed(gis_enabled: pathlib.Path) -> None:
+    # `NaN`/`Infinity` are valid Python floats but invalid JSON: served raw under a 200,
+    # the browser's JSON.parse rejects the body. The API must 503 instead (QCHECK round 5).
+    full = json.loads((gis_enabled / "network.geojson").read_text(encoding="utf-8"))
+    full["features"][0]["properties"]["length_m"] = float("nan")
+    _resign_dataset(gis_enabled, "full", json.dumps(full).encode("utf-8"))
+    with _client() as client:
+        assert client.get("/api/twin/gis/network?scope=full").status_code == 503
+
+
+def test_gis_binding_snapshot_with_disallowed_property_fails_closed(
+    gis_enabled: pathlib.Path,
+) -> None:
+    # The binding property snapshot is the same public surface — a non-allowlisted key
+    # there is refused at manifest validation.
+    manifest = json.loads((gis_enabled / "manifest.json").read_text(encoding="utf-8"))
+    manifest["demo_binding"]["properties"]["remark"] = "internal"
+    _rewrite_manifest(gis_enabled, manifest)
+    with _client() as client:
+        assert client.get("/api/twin/gis/manifest").status_code == 503
+
+
+# ── PR-R3 finding 2 (serve half): the source-identity contract must be recorded ────────
+
+
+@pytest.mark.parametrize(
+    ("mutation"),
+    [
+        {"global_id_unique": False},
+        {"branch_code": "9999999"},
+    ],
+)
+def test_gis_source_audit_false_identity_fails_closed(
+    gis_enabled: pathlib.Path, mutation: dict[str, Any]
+) -> None:
+    manifest = json.loads((gis_enabled / "manifest.json").read_text(encoding="utf-8"))
+    manifest["source"]["audit"].update(mutation)
+    _rewrite_manifest(gis_enabled, manifest)
+    with _client() as client:
+        assert client.get("/api/twin/gis/manifest").status_code == 503, mutation
+
+
+def test_gis_source_audit_missing_fails_closed(gis_enabled: pathlib.Path) -> None:
+    manifest = json.loads((gis_enabled / "manifest.json").read_text(encoding="utf-8"))
+    del manifest["source"]["audit"]
+    _rewrite_manifest(gis_enabled, manifest)
+    with _client() as client:
+        assert client.get("/api/twin/gis/manifest").status_code == 503
+
+
+def test_gis_audit_count_disagrees_with_payload_fails_closed(
+    gis_enabled: pathlib.Path,
+) -> None:
+    # A pinned count that no longer matches the served payload — a re-signed smaller
+    # bundle keeping a stale `expected_full=9273` — must 503, not serve 200 (QCHECK
+    # round 1: audited counts were decorative at serve time).
+    manifest = json.loads((gis_enabled / "manifest.json").read_text(encoding="utf-8"))
+    manifest["source"]["audit"]["expected_full"] = 9273  # the payload serves 2
+    _rewrite_manifest(gis_enabled, manifest)
+    with _client() as client:
+        assert client.get("/api/twin/gis/manifest").status_code == 503
+
+
+def test_gis_boolean_property_value_fails_closed(gis_enabled: pathlib.Path) -> None:
+    # A JSON boolean coerces to 1 in the manifest but stays `true` in the GeoJSON, which
+    # would let a `pipe_id: true` feature defeat the binding identity check (QCHECK
+    # round 1). Booleans are not a public scalar and must 503.
+    full = json.loads((gis_enabled / "network.geojson").read_text(encoding="utf-8"))
+    full["features"][0]["properties"]["pipe_id"] = True
+    _resign_dataset(gis_enabled, "full", json.dumps(full).encode("utf-8"))
+    with _client() as client:
+        assert client.get("/api/twin/gis/network?scope=full").status_code == 503
+
+
+# ── PR-R3 finding 3: the SIMULATED binding must point at a real served pipe ─────────────
+
+
+def test_gis_binding_pipe_absent_from_focus_fails_closed(gis_enabled: pathlib.Path) -> None:
+    # pipe_id 1 exists in the full scope but not the Map Ta Phut focus — placing P-2 on
+    # it would put the marker on a pipe the focus map never draws.
+    manifest = json.loads((gis_enabled / "manifest.json").read_text(encoding="utf-8"))
+    manifest["demo_binding"]["pipe_id"] = 1
+    manifest["demo_binding"]["properties"] = {"pipe_id": 1, "pipe_type": "HDPE", "asset_code": None}
+    _rewrite_manifest(gis_enabled, manifest)
+    with _client() as client:
+        assert client.get("/api/twin/gis/manifest").status_code == 503
+
+
+def test_gis_binding_pipe_duplicated_fails_closed(gis_enabled: pathlib.Path) -> None:
+    focus = _collection([_feature(2, asset_code="AC-2"), _feature(2, asset_code="AC-2")])
+    manifest = json.loads((gis_enabled / "manifest.json").read_text(encoding="utf-8"))
+    manifest["datasets"]["map-ta-phut"]["feature_count"] = 2
+    _rewrite_manifest(gis_enabled, manifest)
+    _resign_dataset(gis_enabled, "map-ta-phut", json.dumps(focus).encode("utf-8"))
+    with _client() as client:
+        assert client.get("/api/twin/gis/network").status_code == 503
+
+
+def test_gis_binding_property_mismatch_fails_closed(gis_enabled: pathlib.Path) -> None:
+    manifest = json.loads((gis_enabled / "manifest.json").read_text(encoding="utf-8"))
+    manifest["demo_binding"]["properties"]["asset_code"] = "WRONG"
     _rewrite_manifest(gis_enabled, manifest)
     with _client() as client:
         assert client.get("/api/twin/gis/manifest").status_code == 503

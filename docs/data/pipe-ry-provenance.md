@@ -32,6 +32,10 @@ Consequences, enforced in code:
   503 for a missing/drifted bundle while on — it never substitutes synthetic geometry.
 - When permission is granted, record the grantor, date, and scope here in place of this
   paragraph before enabling the flag for any judged run.
+- **Rebuild on deploy (PR-R3):** a bundle built before PR-R3 lacks the `source.audit`
+  record and the strict GeoJSON-member checks, so the API now fails it CLOSED (503). Before
+  enabling `PIPE_GIS_ENABLED` on any stack, re-run `make gis-build GIS_SOURCE=…` so the
+  bundle carries `source.audit` and pins the audited 9,273/19 counts.
 
 ## Transformations (scripts/build_pipe_gis.py)
 
@@ -78,3 +82,24 @@ baseline, or an alarm threshold.
   simulation, labelled `SIMULATED`.
 - No SCADA/DMAMA integration; live telemetry in the twin remains `SIMULATED`.
 - Real geometry/attributes in the GIS view do NOT imply an integrated operational GIS.
+
+## Serve-time validation boundary (what the API guards, and what it does not)
+
+The API's load-time checks (`api/app/gis.py`) FAIL CLOSED on a bundle that is missing,
+oversize, hash/size-drifted, structurally invalid, carries a property or GeoJSON member
+outside the reviewed public surface, has a demo binding that does not resolve to exactly
+one served pipe, or whose `source.audit` claims a different branch / a count that
+disagrees with the served payload. These reject a **malformed, wrong, or accidentally
+over-scoped** bundle — including an honest builder's bug or a partial sync.
+
+They are **not** cryptographic tamper-evidence. The manifest lives inside `PIPE_GIS_DIR`
+and is not signed, so an adversary who controls that directory can replace the GeoJSON
+bytes AND re-sign the manifest (recompute `sha256`/`bytes`) and re-assert
+`provenance.geometry = REAL` / `source.audit`. Authenticity against that threat rests on
+the **deployment trust boundary**: the bundle is permission-gated, operator-provisioned,
+and git-ignored (see §Permission status); `PIPE_GIS_ENABLED` is off by default. If the
+bundle directory ever becomes untrusted, the required hardening is an **external trust
+anchor** — a signature or expected digest/source-fingerprint stored OUTSIDE `PIPE_GIS_DIR`
+(and, for a judged run, an enabled-E2E assertion that pins that independent anchor). That
+anchor is deliberately out of scope while the feature is dark and the directory is
+operator-owned.

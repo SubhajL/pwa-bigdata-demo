@@ -103,3 +103,29 @@ if (typeof window !== "undefined" && !window.localStorage) {
     value: memoryStorage as unknown as Storage,
   });
 }
+
+/**
+ * jsdom ships no 2D canvas, so `HTMLCanvasElement.prototype.getContext` logs a
+ * "Not implemented" error and returns null on every call. `gisAdapter.toMaplibreColor`
+ * rasterizes a 1×1 pixel to convert an OKLCH token to hex, so any GIS test that mounts a
+ * map floods the run with that noise (PR-R3 finding 8 LOW). Install ONE intentional,
+ * deterministic 2D-context stub here — a fixed opaque black pixel — so token resolution
+ * has a rasterizer and the log noise is gone. Per-test overrides (e.g. a specific pixel)
+ * still `vi.spyOn` over this and restore back to it. WebGL is never requested: maplibre
+ * is mocked in every test.
+ */
+if (typeof globalThis.HTMLCanvasElement === "function") {
+  const proto = globalThis.HTMLCanvasElement.prototype;
+  proto.getContext = function getContext(
+    contextId: string,
+  ): CanvasRenderingContext2D | null {
+    if (contextId !== "2d") return null;
+    return {
+      fillStyle: "",
+      fillRect: (): void => undefined,
+      getImageData: (): { data: Uint8ClampedArray } => ({
+        data: new Uint8ClampedArray([0, 0, 0, 255]),
+      }),
+    } as unknown as CanvasRenderingContext2D;
+  } as typeof proto.getContext;
+}

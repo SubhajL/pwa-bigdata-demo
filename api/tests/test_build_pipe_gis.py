@@ -21,15 +21,18 @@ from typing import Any
 import pytest
 import shapefile
 from scripts.build_pipe_gis import (
+    AUDITED_BRANCH_CODE,
     ENERGY_REFERENCE,
     PROPERTY_ALLOWLIST,
     GisBuildError,
     SourceFeature,
+    SourceSnapshot,
     build_bundle,
     choose_demo_binding,
     feature_to_geojson,
     geometric_length_m,
     inspect_source,
+    load_source_snapshot,
     main,
     make_transformer,
     normalize_properties,
@@ -37,6 +40,7 @@ from scripts.build_pipe_gis import (
     reproject_paths,
     safe_join,
     select_map_ta_phut_features,
+    verify_source_identity,
 )
 
 #: The delivered dataset's exact projection definition (ESRI WKT).
@@ -506,17 +510,75 @@ def test_builder_manifest_validates_against_api_schema(
     )
 
 
+def test_builder_geojson_passes_the_api_serve_validator(
+    built: tuple[pathlib.Path, dict[str, Any]],
+) -> None:
+    # The PAYLOAD analog of the manifest cross-check: the GeoJSON the builder writes must
+    # be exactly what the API is willing to SERVE. A future builder-added `id`/`bbox`/
+    # foreign member (or a non-allowlisted property) would leave the manifest cross-check
+    # green while the API 503s its own bundle — this catches it (QCHECK round 3).
+    from app.gis import _validate_geojson
+
+    out, manifest = built
+    for scope in ("full", "map-ta-phut"):
+        entry = manifest["datasets"][scope]
+        payload = (out / str(entry["file"])).read_bytes()
+        features = _validate_geojson(str(entry["file"]), payload, entry["feature_count"])
+        assert len(features) == entry["feature_count"]
+
+
 def test_cli_builds_bundle_with_configured_binding(
     fixture_shp: pathlib.Path, tmp_path: pathlib.Path
 ) -> None:
     out = tmp_path / "bundle"
+    # The 5-feature fixture must OVERRIDE the audited 9,273/19 CLI defaults.
     code = main(
-        ["--source", str(fixture_shp), "--out", str(out), "--bind-pipe-id", "101"]
+        [
+            "--source", str(fixture_shp), "--out", str(out), "--bind-pipe-id", "101",
+            "--expect-full", "5", "--expect-focus", "2",
+        ]
     )
     assert code == 0
     manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["demo_binding"]["pipe_id"] == 101
     assert (out / "network.geojson").exists() and (out / "map_ta_phut.geojson").exists()
+
+
+def test_cli_defaults_pass_exactly_the_audited_counts(
+    fixture_shp: pathlib.Path, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The bare command must pass EXACTLY 9273/19 to build_bundle — not merely "something
+    # other than the fixture's 5/2" (QCHECK round 4: the earlier check was too weak).
+    import scripts.build_pipe_gis as bpg
+
+    captured: dict[str, Any] = {}
+
+    def capturing_build(
+        shp: pathlib.Path,
+        out: pathlib.Path,
+        configured_pipe_id: int | None = None,
+        now: Any = None,
+        expect_full: int | None = None,
+        expect_focus: int | None = None,
+    ) -> dict[str, Any]:
+        captured["expect_full"] = expect_full
+        captured["expect_focus"] = expect_focus
+        raise GisBuildError("stop after capturing CLI defaults")
+
+    monkeypatch.setattr(bpg, "build_bundle", capturing_build)
+    code = main(["--source", str(fixture_shp), "--out", str(tmp_path / "b")])
+    assert code == 1
+    assert captured == {"expect_full": 9273, "expect_focus": 19}
+
+
+def test_cli_bare_command_rejects_a_partial_export(
+    fixture_shp: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    # End-to-end: the bare command (defaults 9273/19) hard-fails the 5-feature fixture, so
+    # the direct CLI path can no longer bypass the count contract (QCHECK round 3).
+    code = main(["--source", str(fixture_shp), "--out", str(tmp_path / "b")])
+    assert code == 1
+    assert not (tmp_path / "b" / "manifest.json").exists()
 
 
 def test_cli_reports_failure_with_exit_code_1(
@@ -531,3 +593,133 @@ def test_cli_reports_failure_with_exit_code_1(
     assert code == 1
     assert "gis build failed" in capsys.readouterr().err
     assert not (tmp_path / "bundle" / "manifest.json").exists()
+
+
+# ── PR-R3 finding 2: source-identity fingerprint before a REAL label ───────────────────
+
+
+def test_builder_branch_code_matches_the_api_constant() -> None:
+    from app.models import AUDITED_BRANCH_CODE as API_BRANCH_CODE
+    from app.models import GIS_PUBLIC_PROPERTY_KEYS
+
+    assert AUDITED_BRANCH_CODE == API_BRANCH_CODE == "5531021"
+    # The builder's public output surface IS the API's serve-time allowlist — the two
+    # constants must be identical or a re-signed bundle could sneak a key past one side.
+    assert set(PROPERTY_ALLOWLIST.values()) == set(GIS_PUBLIC_PROPERTY_KEYS)
+
+
+def test_verify_source_identity_accepts_the_audited_fixture(fixture_shp: pathlib.Path) -> None:
+    # Every fixture record is on branch 5531021 with a unique globalId, so identity passes.
+    verify_source_identity(read_source_features(fixture_shp))
+
+
+def test_verify_source_identity_rejects_wrong_branch_code() -> None:
+    features = [_make_feature(1, [[(_E, _N), (_E, _N + 100.0)]], pwaCode="9999999")]
+    with pytest.raises(GisBuildError, match="5531021|branch"):
+        verify_source_identity(features)
+
+
+def test_verify_source_identity_rejects_duplicate_global_id() -> None:
+    features = [
+        _make_feature(1, [[(_E, _N), (_E, _N + 100.0)]], globalId="DUP"),
+        _make_feature(2, [[(_E, _N), (_E, _N + 100.0)]], globalId="DUP"),
+    ]
+    with pytest.raises(GisBuildError, match="globalId"):
+        verify_source_identity(features)
+
+
+def test_verify_source_identity_rejects_missing_global_id() -> None:
+    features = [_make_feature(1, [[(_E, _N), (_E, _N + 100.0)]], globalId="")]
+    with pytest.raises(GisBuildError, match="globalId"):
+        verify_source_identity(features)
+
+
+def test_build_bundle_enforces_pinned_counts(
+    fixture_shp: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    with pytest.raises(GisBuildError, match="expected|99"):
+        build_bundle(fixture_shp, tmp_path / "a", expect_full=99)
+    with pytest.raises(GisBuildError, match="focus|7"):
+        build_bundle(fixture_shp, tmp_path / "b", expect_focus=7)
+    manifest = build_bundle(fixture_shp, tmp_path / "c", expect_full=5, expect_focus=2)
+    assert manifest["source"]["audit"]["expected_full"] == 5
+    assert manifest["source"]["audit"]["expected_focus"] == 2
+
+
+def test_bundle_manifest_records_enforced_source_audit(
+    built: tuple[pathlib.Path, dict[str, Any]],
+) -> None:
+    _, manifest = built
+    audit = manifest["source"]["audit"]
+    assert audit["branch_code"] == AUDITED_BRANCH_CODE == "5531021"
+    assert audit["global_id_unique"] is True
+    assert audit["expected_full"] is None and audit["expected_focus"] is None
+
+
+def test_build_wrong_branch_source_hard_fails(tmp_path: pathlib.Path) -> None:
+    wrong = [(_record(201, "งานมาบตาพุด", pwaCode="0000000"), [[[_E, _N], [_E, _N + 10.0]]])]
+    shp = _write_fixture(tmp_path, features=wrong)
+    with pytest.raises(GisBuildError, match="5531021|branch"):
+        build_bundle(shp, tmp_path / "out")
+
+
+def test_gis_build_target_pins_audited_counts() -> None:
+    # The REAL build must pin the audited 9,273/19 counts, or the count contract is
+    # unenforced on the actual dataset (QCHECK round 1: the flags existed but the
+    # Makefile target never passed them).
+    makefile = (pathlib.Path(__file__).resolve().parents[2] / "Makefile").read_text(
+        encoding="utf-8"
+    )
+    gis_build = makefile.split("gis-build:", 1)[1].split("\n\n", 1)[0]
+    # Assert the exact WIRING (flag -> variable), not just the flag names, and the exact
+    # pinned assignments — not digits appearing anywhere in a comment (QCHECK rounds 2 & 4).
+    assert '--expect-full "$(GIS_EXPECT_FULL)"' in gis_build
+    assert '--expect-focus "$(GIS_EXPECT_FOCUS)"' in gis_build
+    assert "GIS_EXPECT_FULL ?= 9273" in makefile
+    assert "GIS_EXPECT_FOCUS ?= 19" in makefile
+
+
+# ── PR-R3 finding 4: one source snapshot — hashes describe the CONVERTED bytes ─────────
+
+
+def test_load_source_snapshot_reads_required_sidecars(fixture_shp: pathlib.Path) -> None:
+    snapshot = load_source_snapshot(fixture_shp)
+    assert isinstance(snapshot, SourceSnapshot)
+    for name in ("PIPE RY.shp", "PIPE RY.dbf", "PIPE RY.shx", "PIPE RY.prj"):
+        assert snapshot.files[name]
+
+
+def test_inspect_and_read_accept_a_snapshot(fixture_shp: pathlib.Path) -> None:
+    snapshot = load_source_snapshot(fixture_shp)
+    audit = inspect_source(snapshot)
+    features = read_source_features(snapshot)
+    assert audit.feature_count == len(features) == 5
+
+
+def test_build_uses_a_single_source_snapshot(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A OneDrive re-sync between the audit read and the geometry read must be impossible:
+    # the build reads the source ONCE. Simulate a same-name mutation right after the
+    # audit; the build must stay internally consistent (the recorded hash describes the
+    # bytes that were converted, and the count does not drift), not crash or hash bytes
+    # it never converted.
+    import scripts.build_pipe_gis as bpg
+
+    shp = _write_fixture(tmp_path)
+    original_sha = hashlib.sha256(shp.read_bytes()).hexdigest()
+    real_inspect = bpg.inspect_source
+    fired = {"done": False}
+
+    def inspect_then_resync(source: SourceSnapshot) -> Any:
+        audit = real_inspect(source)
+        if not fired["done"]:
+            fired["done"] = True
+            _write_fixture(tmp_path, features=FIXTURE_FEATURES[:3])  # disk now has 3 features
+        return audit
+
+    monkeypatch.setattr(bpg, "inspect_source", inspect_then_resync)
+    manifest = build_bundle(shp, tmp_path / "out")
+    assert manifest["source"]["feature_count"] == 5
+    assert manifest["datasets"]["full"]["feature_count"] == 5
+    assert manifest["source"]["files"]["PIPE RY.shp"]["sha256"] == original_sha

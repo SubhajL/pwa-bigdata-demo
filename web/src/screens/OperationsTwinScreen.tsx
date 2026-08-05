@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { WifiOff } from "lucide-react";
 
@@ -9,8 +9,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { DemoScenarioPanel } from "@/features/twin/DemoScenarioPanel";
 import { EnergyContextCard } from "@/features/twin/EnergyContextCard";
 import { availabilityFromError, highlightedPipeIds, selectedPipeFeature } from "@/features/twin/gisAdapter";
-import { GisNetworkView } from "@/features/twin/GisNetworkView";
 import { GisPipeDetails } from "@/features/twin/GisPipeDetails";
+import { LazyChunkBoundary } from "@/features/twin/LazyChunkBoundary";
 import { ImpactPanel } from "@/features/twin/ImpactPanel";
 import { ProcessSchematic } from "@/features/twin/ProcessSchematic";
 import { SecTooltip } from "@/features/twin/SecTooltip";
@@ -42,6 +42,15 @@ import type {
   TwinTopology,
   TwinView,
 } from "@/features/twin/types";
+
+// GisNetworkView statically imports MapLibre and its CSS (~387 kB gzip). Lazy-load it so
+// the dark default (logical view, PIPE_GIS_ENABLED=0) never pays for that chunk — the
+// MapLibre bundle is fetched only when the GIS tab is first opened (PR-R3 finding 7).
+const GisNetworkView = lazy(() =>
+  import("@/features/twin/GisNetworkView").then((module) => ({
+    default: module.GisNetworkView,
+  })),
+);
 
 const CONNECTION_LABEL: Record<string, string> = {
   connecting: "กำลังเชื่อมต่อ",
@@ -118,7 +127,7 @@ export function OperationsTwinScreen(): JSX.Element {
   // the whole session — switching away and back (or the notice's retry button) refetches
   // (QCHECK 2026-08-05). `viewRef` guards the success continuation: if the operator has
   // already returned to the logical view, a late arrival stores the bundle but must NOT
-  // snap their selection to the bound pump.
+  // snap their selection to the bound pump (late-arrival contract).
   const gisFetchStarted = useRef(false);
   const viewRef = useRef(view);
   useEffect(() => {
@@ -136,6 +145,9 @@ export function OperationsTwinScreen(): JSX.Element {
         setGisManifest(manifest);
         setGisNetwork(network);
         setGisAvailability("ready");
+        // First load while still on GIS: select the bound pump so SEC (2.3) rides the
+        // same binding. Re-entry when the bundle is already loaded is handled in
+        // `changeView` below — together they cover EVERY GIS entry (PR-R3 finding 5).
         if (viewRef.current === "gis") {
           setSelected(manifest.demo_binding.scenario_asset_id);
         }
@@ -156,13 +168,23 @@ export function OperationsTwinScreen(): JSX.Element {
   // the flag implies an API restart — a fresh page load is the honest path there.
   const changeView = useCallback(
     (next: TwinView): void => {
+      // Update the view ref SYNCHRONOUSLY (not only in the passive effect below): a GIS
+      // fetch that resolves after the operator has switched back to logical must read the
+      // fresh "logical" here, or it could still snap P-2 on a stale "gis" (QCHECK round 1).
+      viewRef.current = next;
       if (next === "gis" && gisAvailability === "unavailable") {
         gisFetchStarted.current = false;
         setGisAvailability("idle");
       }
+      // Re-entry with the bundle already loaded re-selects the bound pump, so a pump
+      // left selected in the logical view can never show its SEC beside the GIS binding
+      // (PR-R3 finding 5). The first-load case is handled in the fetch continuation.
+      if (next === "gis" && gisManifest != null) {
+        setSelected(gisManifest.demo_binding.scenario_asset_id);
+      }
       setView(next);
     },
-    [gisAvailability],
+    [gisAvailability, gisManifest],
   );
 
   // The merged status per device: live frames win; a device with no live `health` frame falls
@@ -312,7 +334,12 @@ export function OperationsTwinScreen(): JSX.Element {
             <TwinViewSwitcher view={view} onChange={changeView} />
           </div>
           {view === "logical" ? (
-            <div className="mt-4 grid gap-4 lg:grid-cols-[2fr_1fr]">
+            <div
+              role="tabpanel"
+              id="twin-panel-logical"
+              aria-labelledby="twin-tab-logical"
+              className="mt-4 grid gap-4 lg:grid-cols-[2fr_1fr]"
+            >
               <ProcessSchematic
                 topology={topology}
                 statusOf={statusOf}
@@ -328,7 +355,8 @@ export function OperationsTwinScreen(): JSX.Element {
               </div>
             </div>
           ) : (
-            <GisViewSection
+            <div role="tabpanel" id="twin-panel-gis" aria-labelledby="twin-tab-gis">
+              <GisViewSection
               availability={gisAvailability}
               onRetry={retryGis}
               manifest={gisManifest}
@@ -350,7 +378,8 @@ export function OperationsTwinScreen(): JSX.Element {
               secLoading={secLoading}
               activeImpact={activeImpact}
               impactLoading={impactLoading}
-            />
+              />
+            </div>
           )}
           <footer className="mt-2 flex items-center gap-2 text-dense text-on-surface-variant">
             <SimulatedBadge /> ค่าการวัดทั้งหมดเป็นข้อมูลจำลอง; ที่ตั้งสาขาเป็นข้อมูลจริงของ กปภ.
@@ -441,13 +470,28 @@ function GisViewSection({
   }
   return (
     <div className="mt-4 grid gap-4 lg:grid-cols-[2fr_1fr]">
-      <GisNetworkView
-        manifest={manifest}
-        network={network}
-        markerStatus={markerStatus}
-        highlightedPipeIds={highlighted}
-        onSelectPipe={onSelectPipe}
-      />
+      <LazyChunkBoundary
+        fallback={
+          <div className="h-[560px] w-full" data-testid="gis-chunk-failed">
+            <Alert variant="error">
+              <AlertTitle>ไม่สามารถโหลดโมดูลแผนที่ได้</AlertTitle>
+              <AlertDescription>
+                โปรดรีเฟรชหน้าเพื่อโหลดใหม่ · ระบบจะไม่แสดงภาพทดแทน — แผนผังกระบวนการยังใช้งานได้
+              </AlertDescription>
+            </Alert>
+          </div>
+        }
+      >
+        <Suspense fallback={<Skeleton className="h-[560px] w-full" />}>
+          <GisNetworkView
+            manifest={manifest}
+            network={network}
+            markerStatus={markerStatus}
+            highlightedPipeIds={highlighted}
+            onSelectPipe={onSelectPipe}
+          />
+        </Suspense>
+      </LazyChunkBoundary>
       <div className="flex flex-col gap-4">
         {selected != null && (
           <SecTooltip assetId={selected} sec={displayedSec} loading={secLoading} />
