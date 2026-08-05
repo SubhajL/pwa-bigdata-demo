@@ -287,7 +287,7 @@ strength, all fixed:
    "122.0"⊃"22.0"):** bare number now has its own `dataset-pttf-days` hook; unit asserts
    exact `.textContent`; e2e asserts exact `toHaveText`; direction parses the bare hook.
    **Mutation evidence:** `days+2400h` mutation → unit run FAILED (1 failed/11 passed);
-   reverted → 12/12. 
+   reverted → 12/12.
 4. **Per-line digest grep (wf LOW):** preflight validation is now whole-string
    `[[ =~ ^[0-9a-f]{64}$ ]]` — a noisy multi-line producer reads as probe failure, never a
    verdict.

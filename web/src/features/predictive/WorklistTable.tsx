@@ -93,7 +93,11 @@ function WorklistRow({
           so the E2E can tie what a judge reads to the API value — the data-health-score
           attribute alone never proved the rendered digit (review-workflow MEDIUM). */}
       <td className="px-3 py-2" data-testid="worklist-health-cell">
-        <HealthMeter value={item.health_score} status={item.status} />
+        <HealthMeter
+          value={item.health_score}
+          status={item.status}
+          valueTestId="worklist-health-visible"
+        />
       </td>
       <td className="px-3 py-2 text-right tabular text-on-surface">
         <Num kind="decimal" digits={1} value={pttfDays(item.pttf_hours)} />

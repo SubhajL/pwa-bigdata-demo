@@ -48,9 +48,9 @@ export function ModelCard({ card, loading = false }: ModelCardProps): JSX.Elemen
                   data-testid="model-artifact-sha"
                   data-sha256={card.artifact_sha256}
                   title={card.artifact_sha256}
-                  className="tabular"
+                  className="break-all font-mono text-xs tabular"
                 >
-                  {card.artifact_sha256.slice(0, 12)}…
+                  {card.artifact_sha256}
                 </span>
               }
             />
