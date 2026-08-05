@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 DeviceKind = Literal["pump", "motor", "valve", "sensor"]
 Signal = Literal["pressure_bar", "flow_m3h", "power_kw", "vibration", "bearing_temp_c"]
@@ -524,3 +524,139 @@ class BandsResponse(BaseModel):
 
     bands: dict[str, SignalBand]
     simulated: bool = True
+
+
+# ── Rayong pipe-GIS bundle (PR-G, criterion 2 realism) ─────────────────────────────────
+#
+# These validate the manifest the offline builder wrote (scripts/build_pipe_gis.py — the
+# two must change together; test_build_pipe_gis.py cross-checks a built manifest against
+# this schema). Provenance fields are Literals and `extra="forbid"` on purpose: a bundle
+# claiming anything stronger than the recorded evidence boundary — or smuggling fields
+# this schema never reviewed — must FAIL validation, not be served.
+
+#: A property value the builder's allowlist can emit.
+GisPropertyValue = str | int | float | None
+
+#: THE official figure (docs/data/pipe-ry-provenance.md). One constant, one source of
+#: truth: `EnergyReference` refuses a manifest that deviates in ANY field, because a
+#: different value/unit/year/operator/source would be an unsourced energy claim in a
+#: judge-facing UI.
+OFFICIAL_ENERGY_REFERENCE: dict[str, str | int | float | bool] = {
+    "value_kwh_per_m3": 0.54,
+    "unit": "kWh/m³",
+    "year": 2025,
+    "operator": "East Water",
+    "source_url": (
+        "https://www.eastwater.com/en/sustainability/sustainability-overview/"
+        "environment-dimension/energy-management"
+    ),
+}
+
+
+class GisFileDigest(BaseModel):
+    """One source file's identity: content hash + size."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sha256: str
+    bytes: int
+
+
+class GisSource(BaseModel):
+    """The audited source dataset the bundle was built from."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dataset: str
+    crs: Literal["EPSG:32647"]
+    output_crs: Literal["EPSG:4326"]
+    feature_count: int = Field(gt=0)
+    files: dict[str, GisFileDigest]
+
+
+class GisDatasetSummary(BaseModel):
+    """One served GeoJSON file: name, counts, bounds, and its own digest."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    file: str
+    feature_count: int = Field(gt=0)
+    #: [west, south, east, north] in WGS84 degrees.
+    bounds_wgs84: list[float] = Field(min_length=4, max_length=4)
+    length_m: float = Field(gt=0)
+    sha256: str
+    bytes: int = Field(gt=0)
+
+
+class GisDemoBinding(BaseModel):
+    """The explicit demo crosswalk: scenario asset -> one real source pipe.
+
+    The attachment is a demo decision, not surveyed truth — `placement` can only ever
+    say SIMULATED (rayong-pipe-gis-sec-plan decision 6).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    scenario_asset_id: str
+    pipe_id: int
+    rule: str
+    midpoint_wgs84: list[float] = Field(min_length=2, max_length=2)
+    placement: Literal["SIMULATED"]
+    properties: dict[str, GisPropertyValue]
+
+
+class GisProvenance(BaseModel):
+    """The evidence boundary, field by field. Geometry/attributes come from the delivered
+    shapefile (REAL); the asset binding and marker placement are demo decisions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    geometry: Literal["REAL"]
+    attributes: Literal["REAL"]
+    binding: Literal["SIMULATED"]
+    placement: Literal["SIMULATED"]
+    distribution: str
+
+
+class EnergyReference(BaseModel):
+    """East Water's official 2025 water-grid figure — system-wide CONTEXT only.
+
+    Every field is pinned to `OFFICIAL_ENERGY_REFERENCE` (a float cannot be a `Literal`,
+    hence the validator), and `station_specific` is `Literal[False]`: no verified public
+    evidence gives any station's SEC, so a manifest claiming one — or claiming any other
+    figure, year, unit, operator, or source — is refused at validation.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    value_kwh_per_m3: float
+    unit: str
+    year: int
+    scope: Literal["system-wide"]
+    operator: str
+    source_url: str
+    station_specific: Literal[False]
+
+    @model_validator(mode="after")
+    def _pin_to_official(self) -> EnergyReference:
+        actual = {field: getattr(self, field) for field in OFFICIAL_ENERGY_REFERENCE}
+        if actual != OFFICIAL_ENERGY_REFERENCE:
+            raise ValueError(
+                f"energy reference deviates from the official figure: {actual!r} != "
+                f"{OFFICIAL_ENERGY_REFERENCE!r}"
+            )
+        return self
+
+
+class GisManifest(BaseModel):
+    """The bundle manifest served verbatim at /api/twin/gis/manifest."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["pipe-ry-gis-1"]
+    generated_at: str
+    source: GisSource
+    datasets: dict[str, GisDatasetSummary]
+    demo_binding: GisDemoBinding
+    provenance: GisProvenance
+    energy_reference: EnergyReference

@@ -8,11 +8,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Literal
 
-from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 
 from ..bands import SIGNAL_BANDS
-from ..models import BandsResponse, ImpactResponse, SecResponse, SignalBand, TwinTopology
+from ..gis import GisBundle, build_cache_headers, etag_matches
+from ..models import (
+    BandsResponse,
+    GisManifest,
+    ImpactResponse,
+    SecResponse,
+    SignalBand,
+    TwinTopology,
+)
 from ..ws import Subscriber, TwinHub
 
 logger = logging.getLogger(__name__)
@@ -236,6 +245,71 @@ def twin_impact(request: Request, pipe_id: str) -> ImpactResponse:
         return downstream_customers(pool, pipe_id)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"unknown pipe {pipe_id!r}") from None
+
+
+# ── Rayong pipe-GIS bundle (PR-G, criterion 2 realism) ─────────────────────────────────
+#
+# Fail-closed contract (rayong-pipe-gis-sec-plan Phase 2): disabled -> 404 (this feature
+# does not exist here); enabled but the startup load failed -> 503 (the dependency is
+# broken; synthetic lines are never substituted); unknown scope -> 422 via the Literal.
+
+
+def _gis_bundle(request: Request) -> GisBundle:
+    """The verified bundle from the lifespan load, or the honest error status.
+
+    Raises:
+        HTTPException: 404 when `PIPE_GIS_ENABLED` is off; 503 when it is on but the
+            bundle failed verification at startup.
+    """
+    settings = getattr(request.app.state, "settings", None)
+    if not getattr(settings, "pipe_gis_enabled", False):
+        raise HTTPException(
+            status_code=404,
+            detail="GIS view is not enabled (PIPE_GIS_ENABLED is off)",
+        )
+    bundle: GisBundle | None = getattr(request.app.state, "gis", None)
+    if bundle is None:
+        raise HTTPException(
+            status_code=503,
+            detail="GIS bundle unavailable — it failed verification at startup",
+        )
+    return bundle
+
+
+@router.get(
+    "/api/twin/gis/manifest",
+    response_model=GisManifest,
+    summary="Pipe-GIS bundle manifest (PR-G: provenance, binding, energy reference)",
+)
+def twin_gis_manifest(request: Request) -> GisManifest:
+    """Source identity, dataset digests, demo binding, provenance boundary, and the
+    official East Water energy reference for the loaded bundle."""
+    return _gis_bundle(request).manifest
+
+
+@router.get(
+    "/api/twin/gis/network",
+    summary="Pipe network GeoJSON (PR-G: real Rayong geometry)",
+)
+def twin_gis_network(
+    request: Request, scope: Literal["map-ta-phut", "full"] = "map-ta-phut"
+) -> Response:
+    """The requested scope's GeoJSON, served from the startup-verified in-memory bytes
+    with a strong ETag — never re-read from disk, so a post-startup file change cannot
+    be served under a hash it does not have.
+
+    The bundle is a static build artifact identified by content hash, so `If-None-Match`
+    short-circuits to 304 — the full network is megabytes and the demo reloads pages.
+    """
+    bundle = _gis_bundle(request)
+    headers = build_cache_headers(bundle, scope)
+    if etag_matches(request.headers.get("if-none-match"), headers["ETag"]):
+        return Response(status_code=304, headers=headers)
+    return Response(
+        content=bundle.payloads[scope],
+        media_type="application/geo+json",
+        headers=headers,
+    )
 
 
 @router.get(

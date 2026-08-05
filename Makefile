@@ -6,7 +6,7 @@ COMPOSE_PROJECT_NAME ?= pwa-demo
 export COMPOSE_FILE_PATH COMPOSE_PROJECT_NAME
 COMPOSE := docker compose --file $(COMPOSE_FILE_PATH) --project-name $(COMPOSE_PROJECT_NAME)
 
-.PHONY: help demo-up demo-down demo-preflight demo-reconnect demo-scenario e2e-setup demo-e2e demo-acceptance-3x demo-e2e-cold
+.PHONY: help demo-up demo-down demo-preflight demo-reconnect demo-scenario e2e-setup demo-e2e demo-acceptance-3x demo-e2e-cold gis-build
 
 help: ## list the demo targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-16s %s\n", $$1, $$2}'
@@ -35,6 +35,16 @@ demo-e2e: ## the score gate: preflight, then run the 16-item Playwright E2E; res
 	trap 'FAULT_MODE=normal $(COMPOSE) up -d simulator >/dev/null 2>&1 || true' EXIT; \
 	scripts/demo-preflight.sh; \
 	pnpm --dir e2e test
+
+# PR-G: offline, read-only over the source; output is git-ignored until the data owner
+# records redistribution permission (docs/data/pipe-ry-provenance.md). Deps are
+# build-time only: api/.venv/bin/pip install -r scripts/requirements-gis.txt
+# GIS_SOURCE is deliberately NOT defaulted: the source location is operator-private and
+# does not belong in a committed file.
+GIS_OUT ?= data/curated/pipe_ry
+gis-build: ## build the local pipe-GIS bundle: make gis-build GIS_SOURCE='/path/to/PIPE RY.shp'
+	@test -n "$(GIS_SOURCE)" || { echo "GIS_SOURCE is required: make gis-build GIS_SOURCE='/path/to/PIPE RY.shp'" >&2; exit 2; }
+	api/.venv/bin/python scripts/build_pipe_gis.py --source "$(GIS_SOURCE)" --out "$(GIS_OUT)"
 
 demo-acceptance-3x: ## Gate A1: THREE consecutive score-gate runs + exact-SHA evidence manifest (warm; volumes preserved)
 	RUNS=3 scripts/demo-acceptance.sh

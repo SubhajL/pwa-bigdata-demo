@@ -63,6 +63,19 @@ class Settings(BaseSettings):
     #: stack — compose turns it on; nothing else does.
     demo_controls: bool = False
 
+    #: The Rayong pipe-GIS view (PR-G). Default OFF — the code lands dark; turning it on
+    #: is a deliberate, permission-gated act (docs/data/pipe-ry-provenance.md). Off, the
+    #: /api/twin/gis routes answer 404 and nothing else changes.
+    pipe_gis_enabled: bool = False
+
+    #: Directory holding the pre-built bundle: manifest.json, network.geojson,
+    #: map_ta_phut.geojson. Blank + enabled is a broken configuration -> routes 503.
+    pipe_gis_dir: str = ""
+
+    #: Upper bound on a served GeoJSON file. The audited full network is ~6.6 MB; 50 MB
+    #: leaves growth room while refusing to stream an absurd or swapped file.
+    pipe_gis_max_bytes: int = 50_000_000
+
     #: Comma-separated browser origins allowed to call this API cross-origin.
     #:
     #: Defaulted, not required, so every existing `Settings()` call site keeps working.
