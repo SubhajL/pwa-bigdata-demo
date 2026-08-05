@@ -28,6 +28,14 @@ export default defineConfig({
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
+  // MapLibre resolves its module worker as a sibling of `import.meta.url`. Vite's dev
+  // dependency optimizer relocates only the main module into `.vite/deps`, making that
+  // sibling request 404 and leaving every GeoJSON source permanently unloaded. Serve
+  // MapLibre's native ESM files in development so its packaged worker remains adjacent.
+  optimizeDeps: { exclude: ["maplibre-gl"] },
+  // The production gate reads this artifact graph and fails if the dark GIS dependency
+  // becomes statically reachable from main again.
+  build: { manifest: true },
   server: {
     proxy: {
       // Without these a browser on :5173 sends /api and /ws to VITE, not FastAPI, and

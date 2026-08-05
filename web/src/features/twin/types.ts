@@ -136,6 +136,7 @@ export interface GisSource {
   readonly crs: "EPSG:32647";
   readonly output_crs: "EPSG:4326";
   readonly feature_count: number;
+  readonly fingerprint_sha256: string;
   readonly files: Readonly<Record<string, GisFileDigest>>;
 }
 

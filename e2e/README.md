@@ -46,7 +46,10 @@ the repository Compose file, project `pwa-demo`, API `http://localhost:8000`, an
 stack the GIS endpoints are route-stubbed to 404 for that one test); the four
 real-geometry proofs self-skip unless the stack reports `PIPE_GIS_ENABLED=1` (local
 rehearsal only until GIS data permission is recorded — a 503 from an enabled stack FAILS,
-it is not a skip). The recovery proof restores `pressure_drop` in a `finally`, preserving
+and activation also requires the independently approved
+`PIPE_GIS_APPROVED_SOURCE_FINGERPRINT` and `PIPE_GIS_APPROVED_BUNDLE_SHA256`; it is not a
+skip). The recovery proof restores
+`pressure_drop` in a `finally`, preserving
 the degraded warm state the later specs depend on. — see the trigger→evidence
 mapping in `docs/demo-runbook.md`.
 

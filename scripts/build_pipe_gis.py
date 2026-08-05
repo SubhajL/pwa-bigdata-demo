@@ -8,7 +8,8 @@ writes a read-only bundle:
     <out>/map_ta_phut.geojson  the Map Ta Phut focus selection
     <out>/manifest.json        source hashes, counts, bounds, binding, provenance
 
-    python scripts/build_pipe_gis.py --source "<dir>/PIPE RY.shp" --out data/curated/pipe_ry
+    python scripts/build_pipe_gis.py --source "<dir>/PIPE RY.shp" \
+      --out data/curated/pipe_ry --approved-source-fingerprint "<approved sha256>"
 
 Source-derived outputs are permission-dependent and stay git-ignored until the data
 owner records redistribution permission — see docs/data/pipe-ry-provenance.md.
@@ -23,6 +24,7 @@ import hashlib
 import io
 import json
 import math
+import re
 import struct
 import sys
 from collections.abc import Iterable, Mapping, Sequence
@@ -40,25 +42,26 @@ OUTPUT_CRS = "EPSG:4326"
 #: The exact PROJCS name the delivered .prj must carry; anything else is a hard failure.
 SOURCE_PROJCS = "WGS_1984_UTM_Zone_47N"
 
-#: Sidecars read as ONE in-memory snapshot; the first four are mandatory, `.cpg` optional.
+#: Sidecars read as ONE in-memory snapshot; the first four are mandatory, metadata
+#: sidecars are optional but still fingerprinted when delivered.
 REQUIRED_SUFFIXES: frozenset[str] = frozenset({".shp", ".dbf", ".shx", ".prj"})
-SIDECAR_SUFFIXES: tuple[str, ...] = (".shp", ".dbf", ".shx", ".prj", ".cpg")
+SIDECAR_SUFFIXES: tuple[str, ...] = (".shp", ".dbf", ".shx", ".prj", ".cpg", ".qmd")
 
 #: The one PWA branch code every record of the audited Rayong source carries
 #: (docs/data/pipe-ry-provenance.md §Source). Enforced before a REAL manifest is emitted;
 #: MUST equal app.models.AUDITED_BRANCH_CODE (cross-checked in test_build_pipe_gis.py).
 AUDITED_BRANCH_CODE = "5531021"
 
-#: The delivered dataset's audited feature counts (docs/data/pipe-ry-provenance.md). The
-#: CLI defaults `--expect-full/--expect-focus` to these, so even the bare documented build
-#: command hard-fails a partial or wrong export (PR-R3 QCHECK round 3 — the Makefile path
-#: was pinned but the direct CLI path was not). Override only for a re-audited source.
+#: The delivered dataset's audited feature counts (docs/data/pipe-ry-provenance.md).
+#: They are source-controlled constants, not CLI/Python parameters: a different count is
+#: a different audit and cannot be relabelled REAL with an operator override.
 AUDITED_FULL_COUNT = 9273
 AUDITED_FOCUS_COUNT = 19
 
 FULL_SCOPE_FILE = "network.geojson"
 FOCUS_SCOPE_FILE = "map_ta_phut.geojson"
 MANIFEST_FILE = "manifest.json"
+BUNDLE_FILES: tuple[str, ...] = (MANIFEST_FILE, FULL_SCOPE_FILE, FOCUS_SCOPE_FILE)
 
 DEFAULT_SCENARIO_ASSET = "P-2"
 
@@ -124,6 +127,7 @@ class SourceAudit:
     """Immutable record of what was read: files, hashes, CRS, and counts."""
 
     source_dir: str
+    fingerprint_sha256: str
     files: dict[str, dict[str, Any]]
     shape_type: str
     feature_count: int
@@ -151,6 +155,19 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def bundle_sha256(out_dir: Path) -> str:
+    """Canonical digest of the exact completed manifest and both served payloads."""
+    digest = hashlib.sha256(b"pipe-ry-bundle-v1\0")
+    for name in BUNDLE_FILES:
+        payload = safe_join(out_dir, name).read_bytes()
+        name_bytes = name.encode("utf-8")
+        digest.update(len(name_bytes).to_bytes(4, "big"))
+        digest.update(name_bytes)
+        digest.update(len(payload).to_bytes(8, "big"))
+        digest.update(payload)
+    return digest.hexdigest()
+
+
 @dataclass(frozen=True)
 class SourceSnapshot:
     """The source shapefile set read into memory ONCE.
@@ -169,6 +186,36 @@ class SourceSnapshot:
     @property
     def prj_text(self) -> str:
         return self._bytes(".prj").decode("utf-8", errors="replace")
+
+
+def source_snapshot_fingerprint(snapshot: SourceSnapshot) -> str:
+    """Canonical SHA-256 identity for the exact captured sidecar set.
+
+    Filenames and byte lengths are length-delimited before the bytes, and names are
+    sorted, so dictionary insertion order cannot change the identity and no two
+    filename/content boundaries can be ambiguous. This one digest is the value the data
+    owner approves OUTSIDE the bundle; unlike `source.files`, it cannot be replaced and
+    re-asserted solely by rewriting `manifest.json`.
+    """
+    digest = hashlib.sha256(b"pipe-ry-source-fingerprint-v1\0")
+    for name in sorted(snapshot.files):
+        name_bytes = name.encode("utf-8")
+        payload = snapshot.files[name]
+        digest.update(len(name_bytes).to_bytes(4, "big"))
+        digest.update(name_bytes)
+        digest.update(len(payload).to_bytes(8, "big"))
+        digest.update(payload)
+    return digest.hexdigest()
+
+
+def _approved_fingerprint(value: str | None) -> str:
+    """Normalize one independently approved SHA-256 value or fail the build closed."""
+    normalized = (value or "").strip().lower()
+    if re.fullmatch(r"[0-9a-f]{64}", normalized) is None:
+        raise GisBuildError(
+            "approved source fingerprint is required and must be exactly 64 hex characters"
+        )
+    return normalized
 
 
 def load_source_snapshot(shp_path: Path) -> SourceSnapshot:
@@ -212,6 +259,7 @@ def inspect_source(source: Path | SourceSnapshot) -> SourceAudit:
     with _reader_from_snapshot(snapshot) as rdr:
         return SourceAudit(
             source_dir=str(snapshot.shp_path.parent),
+            fingerprint_sha256=source_snapshot_fingerprint(snapshot),
             files=files,
             shape_type=str(rdr.shapeTypeName),
             feature_count=len(rdr),
@@ -579,8 +627,8 @@ def build_manifest(
     datasets: dict[str, dict[str, Any]],
     binding: DemoBinding,
     generated_at: datetime,
-    expect_full: int | None = None,
-    expect_focus: int | None = None,
+    expect_full: int = AUDITED_FULL_COUNT,
+    expect_focus: int = AUDITED_FOCUS_COUNT,
 ) -> dict[str, Any]:
     """The bundle manifest: schema, source identity, dataset summaries, binding,
     provenance boundary, and the official energy reference. `source.audit` records the
@@ -595,6 +643,7 @@ def build_manifest(
             "crs": audit.crs,
             "output_crs": OUTPUT_CRS,
             "feature_count": audit.feature_count,
+            "fingerprint_sha256": audit.fingerprint_sha256,
             "files": audit.files,
             "audit": {
                 "branch_code": AUDITED_BRANCH_CODE,
@@ -675,16 +724,25 @@ def build_bundle(
     out_dir: Path,
     configured_pipe_id: int | None = None,
     now: datetime | None = None,
-    expect_full: int | None = None,
-    expect_focus: int | None = None,
+    *,
+    approved_source_fingerprint: str | None = None,
 ) -> dict[str, Any]:
-    """End-to-end build; returns the written manifest.
+    """Build only the audited Rayong dataset (9,273 full / 19 focus features).
 
     The source is read into ONE in-memory snapshot (PR-R3 finding 4), the identity
-    fingerprint is enforced before any REAL geometry is emitted (finding 2), and any
-    pinned counts must match exactly.
+    fingerprint is enforced before any REAL geometry is emitted (finding 2), and the
+    source-controlled audited counts must match exactly. Neither the public Python entry
+    point nor the CLI accepts count overrides: a different count is a different audit
+    and must change the reviewed constants in source control.
     """
     snapshot = load_source_snapshot(shp_path)
+    actual_fingerprint = source_snapshot_fingerprint(snapshot)
+    approved_fingerprint = _approved_fingerprint(approved_source_fingerprint)
+    if actual_fingerprint != approved_fingerprint:
+        raise GisBuildError(
+            "approved source fingerprint does not match the captured shapefile sidecars; "
+            "refusing REAL provenance"
+        )
     audit = inspect_source(snapshot)
     features = read_source_features(snapshot)
     if len(features) != audit.feature_count:
@@ -694,14 +752,14 @@ def build_bundle(
         )
     verify_source_identity(features)
     focus = select_map_ta_phut_features(features)
-    if expect_full is not None and len(features) != expect_full:
+    if len(features) != AUDITED_FULL_COUNT:
         raise GisBuildError(
-            f"expected {expect_full} source features but read {len(features)} — "
+            f"expected {AUDITED_FULL_COUNT} source features but read {len(features)} — "
             "count contract drift, refusing"
         )
-    if expect_focus is not None and len(focus) != expect_focus:
+    if len(focus) != AUDITED_FOCUS_COUNT:
         raise GisBuildError(
-            f"expected {expect_focus} Map Ta Phut focus features but selected "
+            f"expected {AUDITED_FOCUS_COUNT} Map Ta Phut focus features but selected "
             f"{len(focus)} — count contract drift, refusing"
         )
     transformer = make_transformer()
@@ -713,7 +771,12 @@ def build_bundle(
         "map-ta-phut": _dataset_summary(FOCUS_SCOPE_FILE, focus, focus_fc),
     }
     manifest = build_manifest(
-        audit, datasets, binding, now or datetime.now(tz=UTC), expect_full, expect_focus
+        audit,
+        datasets,
+        binding,
+        now or datetime.now(tz=UTC),
+        AUDITED_FULL_COUNT,
+        AUDITED_FOCUS_COUNT,
     )
     return write_bundle(out_dir, full_fc, focus_fc, manifest)
 
@@ -724,22 +787,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--source", required=True, help="path to the source .shp")
     parser.add_argument("--out", required=True, help="output bundle directory")
     parser.add_argument(
+        "--approved-source-fingerprint",
+        required=True,
+        help=(
+            "independently approved canonical SHA-256 for the complete source sidecar set"
+        ),
+    )
+    parser.add_argument(
         "--bind-pipe-id", type=int, default=None,
         help="bind the demo asset to this source PIPE_ID (default: longest focus pipe)",
-    )
-    parser.add_argument(
-        "--expect-full", type=int, default=AUDITED_FULL_COUNT,
-        help=(
-            f"hard-fail unless the source has EXACTLY this many features "
-            f"(default: audited {AUDITED_FULL_COUNT}); override only for a re-audited source"
-        ),
-    )
-    parser.add_argument(
-        "--expect-focus", type=int, default=AUDITED_FOCUS_COUNT,
-        help=(
-            f"hard-fail unless the Map Ta Phut focus has EXACTLY this many features "
-            f"(default: audited {AUDITED_FOCUS_COUNT}); override only for a re-audited source"
-        ),
     )
     args = parser.parse_args(argv)
     try:
@@ -747,8 +803,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             Path(args.source),
             Path(args.out),
             args.bind_pipe_id,
-            expect_full=args.expect_full,
-            expect_focus=args.expect_focus,
+            approved_source_fingerprint=args.approved_source_fingerprint,
         )
     except GisBuildError as error:
         print(f"gis build failed: {error}", file=sys.stderr)
@@ -757,7 +812,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(
         f"wrote {args.out}: full={datasets['full']['feature_count']} "
         f"focus={datasets['map-ta-phut']['feature_count']} "
-        f"binding_pipe_id={manifest['demo_binding']['pipe_id']}"
+        f"binding_pipe_id={manifest['demo_binding']['pipe_id']} "
+        f"bundle_sha256={bundle_sha256(Path(args.out))}"
     )
     return 0
 

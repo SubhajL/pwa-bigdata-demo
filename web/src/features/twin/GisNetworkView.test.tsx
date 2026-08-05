@@ -26,11 +26,13 @@ vi.mock("maplibre-gl", () => {
     layerClicks: Array<{ layer: string; handler: Handler }> = [];
     layers: Array<Record<string, unknown>> = [];
     sources: Record<string, { data?: { features?: unknown[] } }> = {};
+    renderedFeatures: unknown[] = [];
     removeThrows = false;
     addSource = vi.fn((id: string, spec: { data?: { features?: unknown[] } }) => {
       this.sources[id] = spec;
     });
     querySourceFeatures = vi.fn((id: string) => this.sources[id]?.data?.features ?? []);
+    queryRenderedFeatures = vi.fn(() => this.renderedFeatures);
     addLayer = vi.fn((spec: Record<string, unknown>) => {
       this.layers.push(spec);
     });
@@ -102,9 +104,11 @@ import { GisNetworkView } from "./GisNetworkView";
 interface MockMapInstance {
   options: Record<string, unknown>;
   layers: Array<Record<string, unknown>>;
+  renderedFeatures: unknown[];
   removeThrows: boolean;
   addSource: ReturnType<typeof vi.fn>;
   addLayer: ReturnType<typeof vi.fn>;
+  queryRenderedFeatures: ReturnType<typeof vi.fn>;
   setFilter: ReturnType<typeof vi.fn>;
   setPaintProperty: ReturnType<typeof vi.fn>;
   fitBounds: ReturnType<typeof vi.fn>;
@@ -136,12 +140,13 @@ const MANIFEST: GisManifest = {
     crs: "EPSG:32647",
     output_crs: "EPSG:4326",
     feature_count: 19,
+    fingerprint_sha256: "ab".repeat(32),
     files: { "PIPE RY.shp": { sha256: "ab", bytes: 10 } },
   },
   datasets: {
     "map-ta-phut": {
       file: "map_ta_phut.geojson",
-      feature_count: 19,
+      feature_count: 1,
       bounds_wgs84: [101.180758, 12.6756819, 101.2100184, 12.7222887],
       length_m: 11023.95,
       sha256: "cd",
@@ -239,7 +244,7 @@ describe("GisNetworkView", () => {
         [101.180758, 12.6756819],
         [101.2100184, 12.7222887],
       ],
-      expect.objectContaining({ padding: expect.any(Number) }),
+      expect.objectContaining({ padding: expect.any(Number), animate: false }),
     );
   });
 
@@ -275,18 +280,31 @@ describe("GisNetworkView", () => {
     expect(highlight.filter).toEqual(["in", ["get", "pipe_id"], ["literal", []]]);
   });
 
-  it("reports readiness only after load completes the source/layer installation", async () => {
+  it("does not report ready from load or source ingestion alone", async () => {
     renderView();
     const map = await mountedMap();
     const view = screen.getByTestId("gis-network-view");
     expect(view).toHaveAttribute("data-map-ready", "false");
     act(() => map.fire("load"));
-    await waitFor(() => expect(view).toHaveAttribute("data-map-ready", "true"));
-    // Readiness implies the layers actually installed — not just that load fired.
+    act(() => map.fire("sourcedata", { sourceId: "pipe-ry", isSourceLoaded: true }));
+    expect(view).toHaveAttribute("data-map-ready", "false");
+    expect(view).toHaveAttribute("data-rendered-features", "0");
     expect(map.layers).toHaveLength(2);
   });
 
-  it("publishes the DISTINCT source feature count once the source loads (render proof)", async () => {
+  it("reports ready only after all distinct base-layer pipes are query-rendered", async () => {
+    renderView();
+    const map = await mountedMap();
+    const view = screen.getByTestId("gis-network-view");
+    act(() => map.fire("load"));
+    map.renderedFeatures = [...NETWORK.features];
+    act(() => map.fire("render"));
+    await waitFor(() => expect(view).toHaveAttribute("data-map-ready", "true"));
+    expect(view).toHaveAttribute("data-rendered-features", "1");
+    expect(map.queryRenderedFeatures).toHaveBeenCalledWith({ layers: ["pipe-ry-line"] });
+  });
+
+  it("publishes the DISTINCT source feature count once the source loads", async () => {
     renderView();
     const map = await mountedMap();
     const view = screen.getByTestId("gis-network-view");
@@ -376,16 +394,41 @@ describe("GisNetworkView", () => {
   });
 
   it("surfaces a pre-load map error as an explicit failed state, never a blank box", async () => {
-    renderView();
-    const map = await mountedMap();
-    act(() => map.fire("error"));
-    await waitFor(() =>
-      expect(screen.getByTestId("gis-map-failed")).toHaveTextContent(/ไม่สามารถเริ่ม/),
-    );
-    expect(screen.getByTestId("gis-network-view")).toHaveAttribute(
-      "data-map-ready",
-      "false",
-    );
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      renderView();
+      const map = await mountedMap();
+      act(() => map.fire("error"));
+      await waitFor(() =>
+        expect(screen.getByTestId("gis-map-failed")).toHaveTextContent(/ไม่สามารถแสดงผล/),
+      );
+      expect(screen.getByTestId("gis-network-view")).toHaveAttribute(
+        "data-map-ready",
+        "false",
+      );
+      expect(warning).toHaveBeenCalledWith("pipe-GIS map error: unknown");
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  it("revokes readiness and fails explicitly on a post-load map error", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      renderView();
+      const map = await mountedMap();
+      const view = screen.getByTestId("gis-network-view");
+      act(() => map.fire("load"));
+      map.renderedFeatures = [...NETWORK.features];
+      act(() => map.fire("render"));
+      await waitFor(() => expect(view).toHaveAttribute("data-map-ready", "true"));
+      act(() => map.fire("error", { error: new Error("WebGL context lost") }));
+      await waitFor(() => expect(screen.getByTestId("gis-map-failed")).toBeVisible());
+      expect(view).toHaveAttribute("data-map-ready", "false");
+      expect(warning).toHaveBeenCalledWith("pipe-GIS map error: WebGL context lost");
+    } finally {
+      warning.mockRestore();
+    }
   });
 
   it("survives a throwing map.remove() on unmount — a broken map must not take the screen down", async () => {

@@ -42,15 +42,11 @@ demo-e2e: ## the score gate: preflight, then run the 16-item Playwright E2E; res
 # GIS_SOURCE is deliberately NOT defaulted: the source location is operator-private and
 # does not belong in a committed file.
 GIS_OUT ?= data/curated/pipe_ry
-# The audited invariants of the delivered PIPE RY dataset (docs/data/pipe-ry-provenance.md):
-# 9,273 full / 19 Map Ta Phut focus features. Pinned here so a wrong export hard-fails the
-# real build (PR-R3 finding 2); override only if a re-audited source changes the counts.
-GIS_EXPECT_FULL ?= 9273
-GIS_EXPECT_FOCUS ?= 19
 gis-build: ## build the local pipe-GIS bundle: make gis-build GIS_SOURCE='/path/to/PIPE RY.shp'
 	@test -n "$(GIS_SOURCE)" || { echo "GIS_SOURCE is required: make gis-build GIS_SOURCE='/path/to/PIPE RY.shp'" >&2; exit 2; }
+	@test -n "$(GIS_APPROVED_SOURCE_FINGERPRINT)" || { echo "GIS_APPROVED_SOURCE_FINGERPRINT is required from the independent data approval record" >&2; exit 2; }
 	api/.venv/bin/python scripts/build_pipe_gis.py --source "$(GIS_SOURCE)" --out "$(GIS_OUT)" \
-		--expect-full "$(GIS_EXPECT_FULL)" --expect-focus "$(GIS_EXPECT_FOCUS)"
+		--approved-source-fingerprint "$(GIS_APPROVED_SOURCE_FINGERPRINT)"
 
 demo-acceptance-3x: ## Gate A1: THREE consecutive score-gate runs + exact-SHA evidence manifest (warm; volumes preserved)
 	RUNS=3 scripts/demo-acceptance.sh

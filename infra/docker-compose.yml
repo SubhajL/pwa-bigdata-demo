@@ -119,10 +119,14 @@ services:
       CURATED_PATH: /srv/data/curated/water_sold_by_branch.csv
       # PR-H: the pipe-GIS view. Default OFF — dark landing; activation is permission-
       # gated (docs/data/pipe-ry-provenance.md). Enable LOCALLY with PIPE_GIS_ENABLED=1
-      # after `make gis-build`; the bundle rides the existing curated bind-mount, and a
+      # after `make gis-build`; activation also requires the independently approved
+      # source fingerprint AND exact PIPE_GIS_APPROVED_BUNDLE_SHA256 printed by the build.
+      # The bundle rides the curated bind-mount, and a
       # missing/drifted bundle fails closed to 503 without touching the logical twin.
       PIPE_GIS_ENABLED: "${PIPE_GIS_ENABLED:-0}"
       PIPE_GIS_DIR: /srv/data/curated/pipe_ry
+      PIPE_GIS_APPROVED_SOURCE_FINGERPRINT: "${PIPE_GIS_APPROVED_SOURCE_FINGERPRINT:-}"
+      PIPE_GIS_APPROVED_BUNDLE_SHA256: "${PIPE_GIS_APPROVED_BUNDLE_SHA256:-}"
       # Browser origins allowed to call the API cross-origin. In the normal setup the
       # Vite proxy makes the browser same-origin and this never fires; it covers a judge
       # calling the API directly on :8000.

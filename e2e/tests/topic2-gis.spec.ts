@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { inflateSync } from "node:zlib";
 
 import { API_BASE, WEB_BASE, apiJson, postScenario } from "../lib/api";
 
@@ -9,7 +10,9 @@ import { API_BASE, WEB_BASE, apiJson, postScenario } from "../lib/api";
 // endpoints are route-stubbed to 404 for that one test, so the proof never self-skips.
 // The four real-geometry proofs are gated on the stack's own report
 // (`/api/twin/gis/manifest`): enable locally with
-//     make gis-build GIS_SOURCE='…/PIPE RY.shp' && PIPE_GIS_ENABLED=1 make demo-e2e
+//     make gis-build GIS_SOURCE='…/PIPE RY.shp' GIS_APPROVED_SOURCE_FINGERPRINT="$FP"
+//     PIPE_GIS_ENABLED=1 PIPE_GIS_APPROVED_SOURCE_FINGERPRINT="$FP" \
+//       PIPE_GIS_APPROVED_BUNDLE_SHA256="$BUNDLE_FP" make demo-e2e
 // Activation for a judged run stays permission-gated (docs/data/pipe-ry-provenance.md).
 // A 503 is deliberately NOT a skip: an enabled stack with a broken bundle must fail.
 //
@@ -35,6 +38,163 @@ test.beforeAll(async () => {
 async function openGisTab(page: Page): Promise<void> {
   await page.goto("/operations");
   await page.getByRole("tab", { name: /แผนที่ GIS มาบตาพุด/ }).click();
+}
+
+async function stubRendererFixture(page: Page): Promise<void> {
+  const manifest = {
+    schema_version: "pipe-ry-gis-1",
+    generated_at: "2026-08-06T00:00:00Z",
+    source: {
+      dataset: "SYNTHETIC E2E RENDERER FIXTURE — NOT PROVENANCE EVIDENCE",
+      crs: "EPSG:32647",
+      output_crs: "EPSG:4326",
+      feature_count: 19,
+      fingerprint_sha256: "ab".repeat(32),
+      files: { "fixture.shp": { sha256: "cd".repeat(32), bytes: 1 } },
+      audit: {
+        branch_code: "5531021",
+        global_id_unique: true,
+        expected_full: 19,
+        expected_focus: 19,
+      },
+    },
+    datasets: {
+      "map-ta-phut": {
+        file: "fixture.geojson",
+        feature_count: 19,
+        bounds_wgs84: [101.18, 12.675, 101.21, 12.722],
+        length_m: 1,
+        sha256: "ef".repeat(32),
+        bytes: 1,
+      },
+      full: {
+        file: "fixture.geojson",
+        feature_count: 19,
+        bounds_wgs84: [101.18, 12.675, 101.21, 12.722],
+        length_m: 1,
+        sha256: "ef".repeat(32),
+        bytes: 1,
+      },
+    },
+    demo_binding: {
+      scenario_asset_id: "P-2",
+      pipe_id: 4926,
+      rule: "synthetic renderer fixture only",
+      midpoint_wgs84: [101.195, 12.685],
+      placement: "SIMULATED",
+      properties: { pipe_id: 4926, pipe_type: "HDPE" },
+    },
+    provenance: {
+      geometry: "REAL",
+      attributes: "REAL",
+      binding: "SIMULATED",
+      placement: "SIMULATED",
+      distribution: "test route fixture only",
+    },
+    energy_reference: {
+      value_kwh_per_m3: 0.54,
+      unit: "kWh/m³",
+      year: 2025,
+      scope: "system-wide",
+      operator: "East Water",
+      source_url: "https://www.eastwater.com/",
+      station_specific: false,
+    },
+  };
+  const network = {
+    type: "FeatureCollection",
+    features: Array.from({ length: 19 }, (_, index) => ({
+      type: "Feature",
+      properties: { pipe_id: index === 0 ? 4926 : 5000 + index, pipe_type: "HDPE" },
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [101.181, 12.676 + index * 0.0023],
+          [101.209, 12.677 + index * 0.0023],
+        ],
+      },
+    })),
+  };
+  await page.route("**/api/twin/gis/manifest", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(manifest) }),
+  );
+  await page.route("**/api/twin/gis/network**", (route) =>
+    route.fulfill({ status: 200, contentType: "application/geo+json", body: JSON.stringify(network) }),
+  );
+}
+
+async function paintedCanvasPixels(page: Page): Promise<number> {
+  const png = await page.getByTestId("gis-network-view").locator("canvas").screenshot();
+  return countPngPixelsDifferentFromCorner(png);
+}
+
+function countPngPixelsDifferentFromCorner(png: Buffer): number {
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let bytesPerPixel = 0;
+  const compressed: Buffer[] = [];
+  while (offset < png.length) {
+    const length = png.readUInt32BE(offset);
+    const type = png.toString("ascii", offset + 4, offset + 8);
+    const body = png.subarray(offset + 8, offset + 8 + length);
+    if (type === "IHDR") {
+      width = body.readUInt32BE(0);
+      height = body.readUInt32BE(4);
+      if (body[8] !== 8 || (body[9] !== 6 && body[9] !== 2)) return 0;
+      bytesPerPixel = body[9] === 6 ? 4 : 3;
+    } else if (type === "IDAT") {
+      compressed.push(body);
+    }
+    offset += length + 12;
+  }
+  const encoded = inflateSync(Buffer.concat(compressed));
+  const stride = width * bytesPerPixel;
+  const pixels = Buffer.alloc(stride * height);
+  let input = 0;
+  for (let row = 0; row < height; row += 1) {
+    const filter = encoded[input];
+    input += 1;
+    const rowStart = row * stride;
+    for (let column = 0; column < stride; column += 1) {
+      const raw = encoded[input + column];
+      const left = column >= bytesPerPixel ? pixels[rowStart + column - bytesPerPixel] : 0;
+      const above = row > 0 ? pixels[rowStart + column - stride] : 0;
+      const upperLeft =
+        row > 0 && column >= bytesPerPixel
+          ? pixels[rowStart + column - stride - bytesPerPixel]
+          : 0;
+      const predictor =
+        filter === 0 ? 0
+        : filter === 1 ? left
+        : filter === 2 ? above
+        : filter === 3 ? Math.floor((left + above) / 2)
+        : filter === 4 ? paeth(left, above, upperLeft)
+        : Number.NaN;
+      if (!Number.isFinite(predictor)) return 0;
+      pixels[rowStart + column] = (raw + predictor) & 0xff;
+    }
+    input += stride;
+  }
+  const reference = pixels.subarray(0, bytesPerPixel);
+  let different = 0;
+  for (let pixel = 0; pixel < pixels.length; pixel += bytesPerPixel) {
+    let distance = 0;
+    for (let channel = 0; channel < bytesPerPixel; channel += 1) {
+      distance += Math.abs(pixels[pixel + channel] - reference[channel]);
+    }
+    if (distance > 8) different += 1;
+  }
+  return different;
+}
+
+function paeth(left: number, above: number, upperLeft: number): number {
+  const estimate = left + above - upperLeft;
+  const leftDistance = Math.abs(estimate - left);
+  const aboveDistance = Math.abs(estimate - above);
+  const upperLeftDistance = Math.abs(estimate - upperLeft);
+  if (leftDistance <= aboveDistance && leftDistance <= upperLeftDistance) return left;
+  return aboveDistance <= upperLeftDistance ? above : upperLeft;
 }
 
 test("GIS runtime NEVER touches the private source path or any external host", async ({ page, baseURL }) => {
@@ -83,6 +243,23 @@ test("dark landing — an explicit disabled notice, and the logical twin loses n
   await expect(page.getByTestId("twin-schematic")).toBeVisible();
 });
 
+test("renderer regression — a browser-queryable pipe is required for readiness", async ({ page }) => {
+  // This synthetic route fixture proves only the MapLibre/WebGL renderer contract and
+  // runs even while real-data permission is pending. It is NOT evidence that the real
+  // Rayong bundle is approved or enabled; those proofs remain gated below.
+  await stubRendererFixture(page);
+  await openGisTab(page);
+  const view = page.getByTestId("gis-network-view");
+  await expect(view).toHaveAttribute("data-map-ready", "true", { timeout: 20_000 });
+  await expect(view).toHaveAttribute("data-source-features", "19");
+  await expect(view).toHaveAttribute("data-rendered-features", "19");
+  await expect(view.locator("canvas")).toBeVisible();
+  // Literal paint proof: queryRenderedFeatures can still return a transparent or
+  // background-coloured line. Read the compositor's WebGL buffer and require a material
+  // number of pixels to differ from the blank corner colour.
+  await expect.poll(() => paintedCanvasPixels(page)).toBeGreaterThan(50);
+});
+
 test.describe("real-bundle proofs (PIPE_GIS_ENABLED=1)", () => {
   test.beforeEach(() => {
     // Single line so the evidence-docs case counter never sees `test.skip(` open a line.
@@ -111,6 +288,15 @@ test.describe("real-bundle proofs (PIPE_GIS_ENABLED=1)", () => {
       String(manifest.datasets["map-ta-phut"].feature_count),
       { timeout: 20_000 },
     );
+    // Painting proof: MapLibre itself must return every distinct pipe from the visible
+    // base layer. A loaded source plus visible canvas can still be blank; this query
+    // fails that hollow success mode and post-load map errors revoke readiness.
+    await expect(view).toHaveAttribute(
+      "data-rendered-features",
+      String(manifest.datasets["map-ta-phut"].feature_count),
+      { timeout: 20_000 },
+    );
+    await expect.poll(() => paintedCanvasPixels(page)).toBeGreaterThan(50);
     await expect(view).toHaveAttribute(
       "data-bound-pipe",
       String(manifest.demo_binding.pipe_id),

@@ -16,8 +16,10 @@ so a broken bundle can never abort API startup.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -32,6 +34,8 @@ from .models import GIS_PUBLIC_PROPERTY_KEYS, GisDemoBinding, GisManifest
 SCOPES: tuple[str, ...] = ("map-ta-phut", "full")
 
 MANIFEST_FILE = "manifest.json"
+FULL_SCOPE_FILE = "network.geojson"
+FOCUS_SCOPE_FILE = "map_ta_phut.geojson"
 
 #: The manifest is metadata — a handful of KB. Anything near this cap is not our
 #: manifest, and it is refused BEFORE json.loads can swallow it.
@@ -336,7 +340,9 @@ def _load_verified(settings: Settings) -> GisBundle:
         raise GisUnavailable(
             f"{manifest_path} exceeds the {MANIFEST_MAX_BYTES}-byte manifest cap"
         )
-    manifest = validate_manifest(json.loads(manifest_path.read_text(encoding="utf-8")))
+    manifest_payload = manifest_path.read_bytes()
+    manifest = validate_manifest(json.loads(manifest_payload))
+    _verify_external_source_fingerprint(settings, manifest)
     payloads: dict[str, bytes] = {}
     features_by_scope: dict[str, list[dict[str, Any]]] = {}
     for scope in SCOPES:
@@ -350,11 +356,72 @@ def _load_verified(settings: Settings) -> GisBundle:
         payloads[scope] = payload
     _verify_source_audit_counts(manifest)
     _verify_demo_binding(manifest.demo_binding, features_by_scope)
+    _verify_external_bundle_digest(settings, manifest_payload, payloads)
     return GisBundle(manifest=manifest, directory=directory, payloads=payloads)
 
 
+def _verify_external_source_fingerprint(
+    settings: Settings, manifest: GisManifest
+) -> None:
+    """Require an approved source identity anchored outside the mutable bundle.
+
+    `source.files` and the manifest's fingerprint prove internal consistency only: an
+    actor replacing PIPE_GIS_DIR can recompute both. The environment value comes from
+    the operator/data-owner approval path and is compared before any payload can serve.
+
+    Raises:
+        GisUnavailable: the external value is missing, malformed, or mismatched.
+    """
+    approved = settings.pipe_gis_approved_source_fingerprint.strip().lower()
+    if re.fullmatch(r"[0-9a-f]{64}", approved) is None:
+        raise GisUnavailable(
+            "PIPE_GIS_APPROVED_SOURCE_FINGERPRINT is required when GIS is enabled "
+            "and must be exactly 64 hex characters"
+        )
+    if not hmac.compare_digest(approved, manifest.source.fingerprint_sha256):
+        raise GisUnavailable(
+            "GIS source fingerprint does not match the independently approved value"
+        )
+
+
+def _verify_external_bundle_digest(
+    settings: Settings, manifest_payload: bytes, payloads: dict[str, bytes]
+) -> None:
+    """Bind activation to the exact manifest and payload bytes held for serving.
+
+    The source fingerprint proves the trusted builder read an approved delivery. This
+    second, independently provisioned digest proves the completed bundle was not replaced
+    afterward by copying that public fingerprint literal and recomputing internal hashes.
+
+    Raises:
+        GisUnavailable: the external digest is missing, malformed, or mismatched.
+    """
+    approved = settings.pipe_gis_approved_bundle_sha256.strip().lower()
+    if re.fullmatch(r"[0-9a-f]{64}", approved) is None:
+        raise GisUnavailable(
+            "PIPE_GIS_APPROVED_BUNDLE_SHA256 is required when GIS is enabled "
+            "and must be exactly 64 hex characters"
+        )
+    exact_files = (
+        (MANIFEST_FILE, manifest_payload),
+        (FULL_SCOPE_FILE, payloads["full"]),
+        (FOCUS_SCOPE_FILE, payloads["map-ta-phut"]),
+    )
+    digest = hashlib.sha256(b"pipe-ry-bundle-v1\0")
+    for name, payload in exact_files:
+        name_bytes = name.encode("utf-8")
+        digest.update(len(name_bytes).to_bytes(4, "big"))
+        digest.update(name_bytes)
+        digest.update(len(payload).to_bytes(8, "big"))
+        digest.update(payload)
+    if not hmac.compare_digest(approved, digest.hexdigest()):
+        raise GisUnavailable(
+            "GIS bundle digest does not match the independently approved exact bundle"
+        )
+
+
 def _verify_source_audit_counts(manifest: GisManifest) -> None:
-    """When the build pinned audited counts (`--expect-full/--expect-focus`), they must
+    """The build's source-controlled audited counts must
     equal the SERVED dataset counts, so a re-signed smaller bundle cannot keep a stale
     `expected_full=9273`/`expected_focus=19` claim while serving fewer features (PR-R3
     QCHECK round 1). `_validate_geojson` already ties each dataset count to its GeoJSON,
@@ -368,8 +435,6 @@ def _verify_source_audit_counts(manifest: GisManifest) -> None:
         ("expected_full", audit.expected_full, "full"),
         ("expected_focus", audit.expected_focus, "map-ta-phut"),
     ):
-        if expected is None:
-            continue
         actual = manifest.datasets[scope].feature_count
         if expected != actual:
             raise GisUnavailable(

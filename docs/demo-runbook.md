@@ -123,10 +123,14 @@ status, the P-2 placement/pipe binding, and customer impact remain **SIMULATED**
 
 It is OFF by default and stays off for judged runs until data-owner permission is
 recorded in `docs/data/pipe-ry-provenance.md`; the tab then shows an explicit
-"ยังไม่เปิดใช้งาน" notice and the logical schematic loses nothing. To rehearse locally:
-`make gis-build GIS_SOURCE='<path>/PIPE RY.shp'`, then start the stack with
-`PIPE_GIS_ENABLED=1`. A missing or hash-drifted bundle fails closed (503 + explicit
-unavailable state) — the map never substitutes synthetic lines.
+"ยังไม่เปิดใช้งาน" notice and the logical schematic loses nothing. To rehearse locally,
+obtain the independently approved source fingerprint, run
+`make gis-build GIS_SOURCE='<path>/PIPE RY.shp' GIS_APPROVED_SOURCE_FINGERPRINT='<sha256>'`,
+record the printed `bundle_sha256` through the external bundle-review record, then start
+the stack with `PIPE_GIS_ENABLED=1 PIPE_GIS_APPROVED_SOURCE_FINGERPRINT='<same source
+sha256>' PIPE_GIS_APPROVED_BUNDLE_SHA256='<approved bundle sha256>'`. A missing, mismatched, or
+hash-drifted bundle fails closed (503 + explicit unavailable state) — the map never
+substitutes synthetic lines.
 
 ---
 
