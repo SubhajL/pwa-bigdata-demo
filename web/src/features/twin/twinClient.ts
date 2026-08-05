@@ -11,6 +11,9 @@ import { getJson } from "@/api/client";
 import type {
   BandsResponse,
   DeviceLiveState,
+  GisManifest,
+  GisNetwork,
+  GisScope,
   ImpactResponse,
   SecResponse,
   TwinEventFrame,
@@ -35,6 +38,19 @@ export function fetchSec(assetId: string, signal?: AbortSignal): Promise<SecResp
 
 export function fetchImpact(pipeId: string, signal?: AbortSignal): Promise<ImpactResponse> {
   return getJson<ImpactResponse>(`/api/twin/impact/${encodeURIComponent(pipeId)}`, { signal });
+}
+
+/** The GIS bundle manifest (PR-H). 404 = feature disabled (dark), 503 = broken bundle. */
+export function fetchGisManifest(signal?: AbortSignal): Promise<GisManifest> {
+  return getJson<GisManifest>("/api/twin/gis/manifest", { signal });
+}
+
+/** One scope's verified GeoJSON. Same status semantics as the manifest. */
+export function fetchGisNetwork(
+  scope: GisScope = "map-ta-phut",
+  signal?: AbortSignal,
+): Promise<GisNetwork> {
+  return getJson<GisNetwork>(`/api/twin/gis/network?scope=${scope}`, { signal });
 }
 
 // ── pure reducers ─────────────────────────────────────────────────────────────────────

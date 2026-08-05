@@ -7,15 +7,23 @@ import { StatusChip, type StatusKind } from "@/components/StatusChip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DemoScenarioPanel } from "@/features/twin/DemoScenarioPanel";
+import { EnergyContextCard } from "@/features/twin/EnergyContextCard";
+import { availabilityFromError, highlightedPipeIds, selectedPipeFeature } from "@/features/twin/gisAdapter";
+import { GisNetworkView } from "@/features/twin/GisNetworkView";
+import { GisPipeDetails } from "@/features/twin/GisPipeDetails";
 import { ImpactPanel } from "@/features/twin/ImpactPanel";
 import { ProcessSchematic } from "@/features/twin/ProcessSchematic";
 import { SecTooltip } from "@/features/twin/SecTooltip";
 import { StatusCounters } from "@/features/twin/StatusCounters";
+import { TwinProvenanceLegend } from "@/features/twin/TwinProvenanceLegend";
+import { TwinViewSwitcher } from "@/features/twin/TwinViewSwitcher";
 import { TWIN_CONFIG } from "@/features/twin/twin.config";
 import { useTwinSocket } from "@/features/twin/useTwinSocket";
 import {
   deriveStatus,
   fetchBands,
+  fetchGisManifest,
+  fetchGisNetwork,
   fetchImpact,
   fetchSec,
   fetchTopology,
@@ -25,10 +33,14 @@ import {
 import type {
   BandsResponse,
   DeviceLiveState,
+  GisAvailability,
+  GisManifest,
+  GisNetwork,
   ImpactResponse,
   SecResponse,
   TwinEventFrame,
   TwinTopology,
+  TwinView,
 } from "@/features/twin/types";
 
 const CONNECTION_LABEL: Record<string, string> = {
@@ -63,6 +75,15 @@ export function OperationsTwinScreen(): JSX.Element {
   const [impactAsset, setImpactAsset] = useState<string | null>(null);
   const [resyncTick, setResyncTick] = useState(0);
 
+  // The GIS view (PR-H). Loaded lazily on first switch — a dark stack (404) or a broken
+  // bundle (503) must cost the logical view nothing, and the distinction is kept:
+  // "disabled" is a configuration statement, "unavailable" is a failure statement.
+  const [view, setView] = useState<TwinView>("logical");
+  const [gisAvailability, setGisAvailability] = useState<GisAvailability>("idle");
+  const [gisManifest, setGisManifest] = useState<GisManifest | null>(null);
+  const [gisNetwork, setGisNetwork] = useState<GisNetwork | null>(null);
+  const [gisPipe, setGisPipe] = useState<number | null>(null);
+
   // Topology + bands: on mount, on every socket (re)open (generation bump), and on the resync
   // poll below — the belt to the reconnect braces, so a long-lived session cannot drift.
   useEffect(() => {
@@ -89,6 +110,60 @@ export function OperationsTwinScreen(): JSX.Element {
     const id = setInterval(() => setResyncTick((t) => t + 1), TWIN_CONFIG.resyncPollMs);
     return () => clearInterval(id);
   }, []);
+
+  // GIS bundle: fetched on the first switch to the GIS view. The ref latch makes an
+  // attempt one-shot (setState only in the async continuation — screen convention;
+  // React 18 makes a post-unmount setState a no-op), but a FAILED attempt releases the
+  // latch: a transient transport blip during an api restart must not brick the map for
+  // the whole session — switching away and back (or the notice's retry button) refetches
+  // (QCHECK 2026-08-05). `viewRef` guards the success continuation: if the operator has
+  // already returned to the logical view, a late arrival stores the bundle but must NOT
+  // snap their selection to the bound pump.
+  const gisFetchStarted = useRef(false);
+  const viewRef = useRef(view);
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
+  useEffect(() => {
+    if (view !== "gis" || gisFetchStarted.current || gisAvailability !== "idle") return;
+    gisFetchStarted.current = true;
+    void (async (): Promise<void> => {
+      try {
+        const [manifest, network] = await Promise.all([
+          fetchGisManifest(),
+          fetchGisNetwork("map-ta-phut"),
+        ]);
+        setGisManifest(manifest);
+        setGisNetwork(network);
+        setGisAvailability("ready");
+        if (viewRef.current === "gis") {
+          setSelected(manifest.demo_binding.scenario_asset_id);
+        }
+      } catch (error: unknown) {
+        gisFetchStarted.current = false;
+        setGisAvailability(availabilityFromError(error));
+      }
+    })();
+  }, [view, gisAvailability]);
+
+  const retryGis = useCallback((): void => {
+    gisFetchStarted.current = false;
+    setGisAvailability("idle");
+  }, []);
+
+  // Re-entering the GIS tab is the natural retry gesture after a transient failure.
+  // "disabled" stays sticky on purpose: a 404 states configuration intent, and flipping
+  // the flag implies an API restart — a fresh page load is the honest path there.
+  const changeView = useCallback(
+    (next: TwinView): void => {
+      if (next === "gis" && gisAvailability === "unavailable") {
+        gisFetchStarted.current = false;
+        setGisAvailability("idle");
+      }
+      setView(next);
+    },
+    [gisAvailability],
+  );
 
   // The merged status per device: live frames win; a device with no live `health` frame falls
   // back to its topology (persisted-health) status as the baseline.
@@ -233,26 +308,163 @@ export function OperationsTwinScreen(): JSX.Element {
             </p>
           )}
           <StatusCounters statuses={statuses} simulated={topology.simulated} />
-          <div className="mt-4 grid gap-4 lg:grid-cols-[2fr_1fr]">
-            <ProcessSchematic
-              topology={topology}
-              statusOf={statusOf}
-              affectedPipeIds={affectedPipeIds}
-              selected={selected}
-              onSelect={setSelected}
-            />
-            <div className="flex flex-col gap-4">
-              {selected != null && <SecTooltip assetId={selected} sec={displayedSec} loading={secLoading} />}
-              <ImpactPanel impact={activeImpact} loading={impactLoading} />
-              {/* Renders ONLY when the API reports DEMO_CONTROLS on (self-hiding). */}
-              <DemoScenarioPanel />
-            </div>
+          <div className="mt-4">
+            <TwinViewSwitcher view={view} onChange={changeView} />
           </div>
+          {view === "logical" ? (
+            <div className="mt-4 grid gap-4 lg:grid-cols-[2fr_1fr]">
+              <ProcessSchematic
+                topology={topology}
+                statusOf={statusOf}
+                affectedPipeIds={affectedPipeIds}
+                selected={selected}
+                onSelect={setSelected}
+              />
+              <div className="flex flex-col gap-4">
+                {selected != null && <SecTooltip assetId={selected} sec={displayedSec} loading={secLoading} />}
+                <ImpactPanel impact={activeImpact} loading={impactLoading} />
+                {/* Renders ONLY when the API reports DEMO_CONTROLS on (self-hiding). */}
+                <DemoScenarioPanel />
+              </div>
+            </div>
+          ) : (
+            <GisViewSection
+              availability={gisAvailability}
+              onRetry={retryGis}
+              manifest={gisManifest}
+              network={gisNetwork}
+              markerStatus={
+                gisManifest != null
+                  ? statusOf(gisManifest.demo_binding.scenario_asset_id)
+                  : "nodata"
+              }
+              highlighted={
+                gisManifest != null
+                  ? highlightedPipeIds(gisManifest.demo_binding, droppedAsset)
+                  : []
+              }
+              gisPipe={gisPipe}
+              onSelectPipe={setGisPipe}
+              selected={selected}
+              displayedSec={displayedSec}
+              secLoading={secLoading}
+              activeImpact={activeImpact}
+              impactLoading={impactLoading}
+            />
+          )}
           <footer className="mt-2 flex items-center gap-2 text-dense text-on-surface-variant">
             <SimulatedBadge /> ค่าการวัดทั้งหมดเป็นข้อมูลจำลอง; ที่ตั้งสาขาเป็นข้อมูลจริงของ กปภ.
           </footer>
         </div>
       )}
+    </div>
+  );
+}
+
+interface GisViewSectionProps {
+  readonly availability: GisAvailability;
+  readonly onRetry: () => void;
+  readonly manifest: GisManifest | null;
+  readonly network: GisNetwork | null;
+  readonly markerStatus: StatusKind;
+  readonly highlighted: readonly number[];
+  readonly gisPipe: number | null;
+  readonly onSelectPipe: (pipeId: number | null) => void;
+  readonly selected: string | null;
+  readonly displayedSec: SecResponse | null;
+  readonly secLoading: boolean;
+  readonly activeImpact: ImpactResponse | null;
+  readonly impactLoading: boolean;
+}
+
+/**
+ * The GIS half of the dual view (PR-H). Dark landing is a feature, not a failure: a 404
+ * renders an explicit "not enabled" notice, a broken bundle renders an explicit
+ * unavailable state — real geometry is never faked and the logical view is one tab
+ * away. When the verified bundle is present, the map shares the SAME scenario state
+ * (statusOf/droppedAsset/SEC) as the logical schematic.
+ */
+function GisViewSection({
+  availability,
+  onRetry,
+  manifest,
+  network,
+  markerStatus,
+  highlighted,
+  gisPipe,
+  onSelectPipe,
+  selected,
+  displayedSec,
+  secLoading,
+  activeImpact,
+  impactLoading,
+}: GisViewSectionProps): JSX.Element {
+  if (availability === "idle" || availability === "loading") {
+    return <Skeleton className="mt-4 h-[560px] w-full" />;
+  }
+  if (availability === "disabled") {
+    // A 404 says only "the flag is off" — the CLIENT cannot know why (permission
+    // pending, or simply started without PIPE_GIS_ENABLED=1), so the notice states the
+    // configuration fact and points at the activation procedure, asserting nothing more.
+    return (
+      <div className="mt-4" data-testid="gis-availability">
+        <Alert variant="info">
+          <AlertTitle>มุมมอง GIS ยังไม่เปิดใช้งาน</AlertTitle>
+          <AlertDescription>
+            ระบบนี้เริ่มทำงานโดยปิด PIPE_GIS_ENABLED ไว้ · ขั้นตอนการเปิดใช้งานอยู่ใน
+            docs/data/pipe-ry-provenance.md · แผนผังกระบวนการยังใช้งานได้ตามปกติ
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+  if (availability === "unavailable" || manifest == null || network == null) {
+    return (
+      <div className="mt-4" data-testid="gis-availability">
+        <Alert variant="error">
+          <AlertTitle>ชุดข้อมูล GIS ไม่พร้อมใช้งาน</AlertTitle>
+          <AlertDescription>
+            ชุดข้อมูลไม่ผ่านการตรวจสอบหรือเข้าถึงไม่ได้ · ระบบจะไม่แสดงข้อมูลทดแทน —
+            ใช้แผนผังกระบวนการระหว่างแก้ไข
+          </AlertDescription>
+        </Alert>
+        <button
+          type="button"
+          data-testid="gis-retry"
+          onClick={onRetry}
+          className="mt-2 rounded-md bg-surface-container px-3 py-1.5 text-dense text-on-surface hover:text-primary"
+        >
+          ลองเชื่อมต่อใหม่
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-4 grid gap-4 lg:grid-cols-[2fr_1fr]">
+      <GisNetworkView
+        manifest={manifest}
+        network={network}
+        markerStatus={markerStatus}
+        highlightedPipeIds={highlighted}
+        onSelectPipe={onSelectPipe}
+      />
+      <div className="flex flex-col gap-4">
+        {selected != null && (
+          <SecTooltip assetId={selected} sec={displayedSec} loading={secLoading} />
+        )}
+        <EnergyContextCard
+          sec={displayedSec}
+          loading={secLoading}
+          reference={manifest.energy_reference}
+        />
+        <GisPipeDetails
+          feature={selectedPipeFeature(network, gisPipe)}
+          boundPipeId={manifest.demo_binding.pipe_id}
+        />
+        <ImpactPanel impact={activeImpact} loading={impactLoading} />
+        <TwinProvenanceLegend />
+        <DemoScenarioPanel />
+      </div>
     </div>
   );
 }

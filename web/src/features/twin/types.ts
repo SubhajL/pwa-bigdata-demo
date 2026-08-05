@@ -123,3 +123,91 @@ export interface DeviceLiveState {
 }
 
 export type ConnectionState = "connecting" | "open" | "reconnecting" | "closed" | "disabled";
+
+// ── Rayong pipe-GIS bundle (PR-H) — field-for-field with the api GIS models ──────────
+
+export interface GisFileDigest {
+  readonly sha256: string;
+  readonly bytes: number;
+}
+
+export interface GisSource {
+  readonly dataset: string;
+  readonly crs: "EPSG:32647";
+  readonly output_crs: "EPSG:4326";
+  readonly feature_count: number;
+  readonly files: Readonly<Record<string, GisFileDigest>>;
+}
+
+export interface GisDatasetSummary {
+  readonly file: string;
+  readonly feature_count: number;
+  /** [west, south, east, north] in WGS84 degrees. */
+  readonly bounds_wgs84: readonly number[];
+  readonly length_m: number;
+  readonly sha256: string;
+  readonly bytes: number;
+}
+
+/** A property value the builder's allowlist can emit. */
+export type GisPropertyValue = string | number | null;
+
+export interface GisDemoBinding {
+  readonly scenario_asset_id: string;
+  readonly pipe_id: number;
+  readonly rule: string;
+  readonly midpoint_wgs84: readonly number[];
+  /** The attachment is a demo decision, not surveyed truth — always SIMULATED. */
+  readonly placement: "SIMULATED";
+  readonly properties: Readonly<Record<string, GisPropertyValue>>;
+}
+
+export interface GisProvenance {
+  readonly geometry: "REAL";
+  readonly attributes: "REAL";
+  readonly binding: "SIMULATED";
+  readonly placement: "SIMULATED";
+  readonly distribution: string;
+}
+
+/** East Water's official 2025 water-grid figure — system-wide CONTEXT only. */
+export interface EnergyReference {
+  readonly value_kwh_per_m3: number;
+  readonly unit: string;
+  readonly year: number;
+  readonly scope: "system-wide";
+  readonly operator: string;
+  readonly source_url: string;
+  readonly station_specific: false;
+}
+
+export interface GisManifest {
+  readonly schema_version: "pipe-ry-gis-1";
+  readonly generated_at: string;
+  readonly source: GisSource;
+  readonly datasets: Readonly<Record<string, GisDatasetSummary>>;
+  readonly demo_binding: GisDemoBinding;
+  readonly provenance: GisProvenance;
+  readonly energy_reference: EnergyReference;
+}
+
+export interface GisLineFeature {
+  readonly type: "Feature";
+  readonly properties: Readonly<Record<string, GisPropertyValue>>;
+  readonly geometry: {
+    readonly type: "LineString" | "MultiLineString";
+    readonly coordinates: unknown;
+  };
+}
+
+export interface GisNetwork {
+  readonly type: "FeatureCollection";
+  readonly features: readonly GisLineFeature[];
+}
+
+export type GisScope = "map-ta-phut" | "full";
+
+/** The GIS view's lifecycle: dark landing distinguishes disabled from broken. */
+export type GisAvailability = "idle" | "loading" | "ready" | "disabled" | "unavailable";
+
+export type TwinView = "logical" | "gis";
