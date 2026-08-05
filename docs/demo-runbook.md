@@ -80,7 +80,7 @@ This retires the cold-start timing constraint below: on a warm stack, press
 
 **Item 1.4 SQL** (run in a second terminal):
 ```bash
-docker compose -f infra/docker-compose.yml exec -T timescaledb psql -U pwa -d pwa -f - < scripts/show-hypertable.sql
+docker compose --file infra/docker-compose.yml --project-name pwa-demo exec -T timescaledb psql -U pwa -d pwa -f - < scripts/show-hypertable.sql
 ```
 Shows `telemetry` is a TimescaleDB hypertable (with chunks) and a bounded time-range read returns
 ordered rows.
@@ -118,7 +118,7 @@ ordered rows.
 
 | # | Trigger | Where to look | Expect | Reset |
 |---|---|---|---|---|
-| 3.1 (5) | Run `docker compose -f infra/docker-compose.yml exec -T api sha256sum /srv/artifacts/model.pkl` | Trained-Model card → **Artifact SHA-256 · model.pkl** | **Ridge**, `alpha`, StandardScaler, MAE **≪** baseline, and all **64** visible digest characters exactly match `sha256sum` | — |
+| 3.1 (5) | Run `docker compose --file infra/docker-compose.yml --project-name pwa-demo exec -T api sha256sum /srv/artifacts/model.pkl` | Trained-Model card → **Artifact SHA-256 · model.pkl** | **Ridge**, `alpha`, StandardScaler, MAE **≪** baseline, and all **64** visible digest characters exactly match `sha256sum` | — |
 | 3.2 (5) | — | Health Score บนชุดข้อมูล 2 ชุด | Dataset A (healthy) **≫** Dataset B (degraded) — e.g. 99.5 vs 30.1 | — |
 | 3.3 (5) | — | a device's health status ↔ its twin symbol | the twin reflects the model's health (bound ≤ 30s, measured in `api/tests/test_scoring_cycle.py`) | — |
 | 3.4 (5) | Swagger `/docs` → `POST /api/feedback` → **Try it out**, or the on-screen form → **ส่งผลการตรวจสอบ** | the ack | **200** with `stored: true` + an `id` (proof it persisted) | — |
@@ -139,45 +139,53 @@ Green = every scored behaviour is demonstrable. Spec ids map 1:1 to the rows abo
 ## Gate A1 acceptance (exact-SHA evidence, PR-F)
 
 ```bash
-make demo-acceptance-3x                        # 3 CONSECUTIVE score-gate runs, warm; volumes preserved
-make demo-e2e-cold CONFIRM_VOLUME_RESET=1     # true cold run — DESTROYS volumes; refuses without the flag
+git fetch --prune origin
+git status --porcelain                         # must print nothing
+test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+EVIDENCE_DIR=/absolute/path/outside/worktree make demo-acceptance-3x
+# Separate destructive authorization only:
+EVIDENCE_DIR=/absolute/path/outside/worktree make demo-e2e-cold CONFIRM_VOLUME_RESET=1
 ```
 
-`demo-acceptance-3x` writes an **evidence manifest** to `evidence/` — the exact commit SHA
-(with a dirty flag), warm/cold label, the gate command that actually ran, the served
-`artifact_sha256` and TimescaleDB hypertable chunk count **sampled after the accepted run**
-(so provenance describes the runtime that passed), and per-run exit codes + durations. The
-first failed run aborts (Gate A1 demands consecutive passes) and the manifest still records
-the failure.
+Production acceptance refreshes `origin/main` itself and refuses before any reset, score gate, or
+manifest unless the checkout is clean, **HEAD == origin/main**, and `EVIDENCE_DIR` resolves
+outside the worktree. It allowlists this repository's canonical GitHub HTTPS/SSH `origin`, ignores
+inherited Git repository-selection variables, pins the score gate to `/usr/bin/make`, and refuses
+a non-candidate Compose file, a project other than `pwa-demo`, or non-canonical API/web endpoints.
+The external directory is intentional: creating evidence inside the candidate would dirty the
+source whose identity the run is meant to prove.
+
+The `demo-acceptance/v2` manifest binds `source_before` and `source_after` (SHA,
+`origin/main`, verified origin URL, and cleanliness), the trusted Git executable and
+remote-verification result, exact `compose` file/project and API/web endpoint identity, warm/cold mode, the resolved gate
+executable, served `artifact_sha256`, TimescaleDB chunk count, and every run exit and duration.
+Runtime probes, a second remote refresh, and the second source snapshot happen after the score
+gate. Source or ref drift writes `result: invalid` with `failure_reason`, exits 2, and never
+prints ACCEPTED; a normal gate failure writes `result: failed` and exits 1.
 
 **Destruction is fail-closed.** Volume removal exists in exactly one place —
-`scripts/lib/volume-reset.sh` — and both `make demo-down` and `make demo-e2e-cold` route
-through it. The confirmation check lives *inside* that script, in the same process as the
-`down -v`, so `make -i` (or an inherited `MAKEFLAGS=-i`, which ignores a failed recipe
-line) cannot step past it. Without `CONFIRM_VOLUME_RESET=1` exactly, no Docker command
-runs at all.
+`scripts/lib/volume-reset.sh` — and both `make demo-down` and `make demo-e2e-cold` route through
+it. For cold acceptance, `demo-acceptance.sh` calls that guarded reset itself and then runs the
+score gate in the **same execution**. No externally writable file or token can convert a warm
+stack into cold evidence. Without `CONFIRM_VOLUME_RESET=1` exactly, no Docker command runs.
 
-**A cold label is earned, not asserted.** A successful reset mints a **single-use cold
-capability** (outside the worktree, so a clean checkout still reports `dirty: false`); the
-acceptance runner *atomically claims* it before the gate starts, and refuses a `cold` label
-without one — so a warm stack cannot be recorded as cold, one reset cannot authorize two
-runs, and a stale, future-dated, or different-compose-project capability is rejected.
-Likewise `DEMO_E2E_CMD` (the harness's own test seam) is **refused** outside
-`ACCEPTANCE_TEST_MODE=1` (exactly `1`), and test-mode manifests carry the
-`demo-acceptance/v1-test` schema plus `test_mode: true` — a contract-test record can never
-be mistaken for Gate A1 evidence.
+`DEMO_E2E_CMD` is refused outside `ACCEPTANCE_TEST_MODE=1` (exactly `1`). Test mode skips
+production source enforcement and destruction, and its manifests use
+`demo-acceptance/v2-test` plus `test_mode: true`, so contract-test output is not Gate A1 evidence.
+`API_BASE`, `WEB_BASE`, `COMPOSE_FILE_PATH`, and `COMPOSE_PROJECT_NAME` remain useful for direct
+rehearsal, but production acceptance refuses their non-canonical values so one stack cannot be
+used as evidence for another.
 
-**What the manifest does and does not authenticate.** It records the exact SHA, the gate
-command *and the absolute executable it resolved to*, and provenance sampled from the
-runtime that passed; the runner strips `MAKEFLAGS`/`MFLAGS`/`MAKELEVEL`/`MAKEOVERRIDES`
-before invoking the gate, so an inherited `-i`/`-n` cannot turn a failing or skipped suite
-into an "ACCEPTED" record. It is evidence about a run **on a trusted operator machine** —
-it is not signed, and it does not attest the host's `PATH` or toolchain. Gate A1 therefore
-means: this manifest, produced from a clean merged SHA on the demo machine, and committed
-alongside the log that cites it.
+**What the manifest does and does not authenticate.** It records the exact SHA, the gate command
+and resolved executable, and post-gate runtime provenance. The runner strips
+`MAKEFLAGS`/`MFLAGS`/`MAKELEVEL`/`MAKEOVERRIDES`, so inherited make control flags cannot forge a
+pass. It also uses a minimal Git environment so `GIT_DIR`, `GIT_WORK_TREE`, index/config/object
+overrides, and related inherited variables cannot redirect source checks. It is evidence from a
+trusted operator machine; it is not signed and does not attest the host toolchain.
 
-**Evidence conventions:** a Gate A1 run commits its manifest(s) from `evidence/` and the
-Coding Log links them by filename next to the counts it claims — a number in a log without
-its manifest is an assertion, not evidence. The harness itself is behaviorally tested in
-`api/tests/test_acceptance_harness.py` (confirmation guard, exact-SHA capture, three-run
-failure propagation, warm/cold labels, and the five-case provenance-probe matrix).
+**Evidence conventions:** do not modify the candidate during the run. After the runner exits,
+record the external manifest path and exact filename beside the claimed counts. A count with no
+retained manifest is an assertion, not evidence. The harness is behaviorally tested in
+`api/tests/test_acceptance_harness.py`, including source drift, same-execution cold reset,
+remote freshness and origin substitution, poisoned Git/PATH contexts, stack/endpoint identity,
+failure propagation, and the five-case provenance matrix.

@@ -11,8 +11,8 @@ make e2e-setup                       # installs Playwright + chromium
 
 # every time
 make demo-e2e                        # preflight the stack, then run all 16 items (resets the sim on exit)
-make demo-acceptance-3x              # Gate A1: 3 consecutive gate runs + exact-SHA evidence manifest
-make demo-e2e-cold CONFIRM_VOLUME_RESET=1  # true cold acceptance — DESTROYS volumes; refuses without the flag
+EVIDENCE_DIR=/absolute/path/outside/worktree make demo-acceptance-3x
+EVIDENCE_DIR=/absolute/path/outside/worktree make demo-e2e-cold CONFIRM_VOLUME_RESET=1
 make demo-down CONFIRM_VOLUME_RESET=1      # same guard: volume removal has ONE entry point
 # or, if the stack is already up:
 cd e2e && pnpm test
@@ -20,8 +20,11 @@ cd e2e && pnpm test tests/topic1-pipeline.spec.ts   # one topic
 cd e2e && pnpm report                # open the HTML report
 ```
 
-Override the targets with `API_BASE` / `WEB_BASE` env vars (defaults `http://localhost:8000` and
-`http://localhost:5173`).
+For direct rehearsal, endpoints can be overridden with `API_BASE` / `WEB_BASE`, and every Make,
+Bash, and TypeScript Docker call uses the same `COMPOSE_FILE_PATH` and `COMPOSE_PROJECT_NAME`
+contract. Production Gate A1 acceptance deliberately refuses non-canonical values: it is bound to
+the repository Compose file, project `pwa-demo`, API `http://localhost:8000`, and web
+`http://localhost:5173`.
 
 ## What it drives
 
@@ -29,8 +32,8 @@ Override the targets with `API_BASE` / `WEB_BASE` env vars (defaults `http://loc
   database. Specs use **delta counters** where residual state could mislead, and the scenario
   suite deliberately ENDS on `pressure_drop` — P-2 is left degraded, the warm state the later
   topic2/topic3 specs expect (the header of `scenario-transitions.spec.ts` explains why).
-- Scenarios are the real mechanism, not fixtures: specs run `docker compose` directly to
-  restart the broker (item 1.2) and switch `FAULT_MODE` (item 1.5), and drive the demo
+- Scenarios are the real mechanism, not fixtures: specs use the shared explicit Compose identity
+  to restart the broker (item 1.2) and switch `FAULT_MODE` (item 1.5), and drive the demo
   director over HTTP (`POST /api/demo/scenario`).
 
 ## Coverage

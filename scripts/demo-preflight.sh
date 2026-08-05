@@ -12,7 +12,7 @@ set -euo pipefail
 API="${API_BASE:-http://localhost:8000}"
 WEB="${WEB_BASE:-http://localhost:5173}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-COMPOSE=(docker compose -f "$ROOT/infra/docker-compose.yml")
+source "$ROOT/scripts/lib/demo-compose.sh"
 
 # Bound every probe: a socket that accepts the connection but never answers (a hung Vite dev
 # server, a blackholed port) would otherwise wedge a curl — and the whole gate — indefinitely,
@@ -22,7 +22,7 @@ CURL=(curl -sf --connect-timeout 2 --max-time 5)
 
 echo "═══ PWA big-data demo — preflight ═══"
 echo "→ bringing the stack up (build if needed) …"
-"${COMPOSE[@]}" up -d --build
+"${DEMO_COMPOSE[@]}" up -d --build
 
 printf '→ waiting for API %s/healthz ' "$API"
 for i in $(seq 1 60); do
@@ -68,7 +68,7 @@ check "frontend"                    "$WEB/"
 # Bounded like every other probe (in-container busybox `timeout`): a wedged Postgres must
 # not hang the whole gate. An exec/psql FAILURE is reported as exactly that — only a real
 # empty catalog result may claim "not a hypertable".
-if chunks=$("${COMPOSE[@]}" exec -T timescaledb timeout 8 psql -U pwa -d pwa -tA \
+if chunks=$("${DEMO_COMPOSE[@]}" exec -T timescaledb timeout 8 psql -U pwa -d pwa -tA \
   -c "SELECT num_chunks FROM timescaledb_information.hypertables WHERE hypertable_name='telemetry'" \
   2>/dev/null); then
   if [ -n "${chunks:-}" ]; then

@@ -91,8 +91,11 @@ These score in the **written 80% technical proposal**, not the live demo.
 - **Clickable app:** ✅ topic ๑/๒/๓ screens live and wired to the backend.
 - **Implementation:** ✅ 16/16 built and wired; the PR-D/PR-E literal oracles are delivered
   (rows above), acceptance pending Gate A1.
-- **Acceptance:** ◑ Gate A1 pending; a warm `make demo-e2e` run is strong rehearsal evidence, not
-  a substitute for the exact-SHA acceptance gate.
+- **Acceptance:** ◑ Gate A1 pending; PR-F's remediated harness refreshes remote truth, rejects
+  dirty/stale or Git-context-substituted source, pins one candidate Compose stack/endpoints and
+  trusted make executable, and performs a confirmed cold reset in the same execution as its gate.
+  A warm `make demo-e2e` run remains rehearsal, not the final exact-SHA warm-three-run or
+  separately authorized true-cold result.
 - **Stack readiness:** Run `make demo-preflight` → `✓ DEMO READY`, then walk
   `docs/demo-runbook.md`; this preflight result describes the running stack, not final evidence
   acceptance.

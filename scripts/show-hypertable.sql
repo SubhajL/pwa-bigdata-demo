@@ -1,7 +1,7 @@
 -- Scored item 1.4 — proof that telemetry lives in a TimescaleDB HYPERTABLE and that a
 -- time-range read returns ordered rows. Run it against the demo database:
 --
---   docker compose -f infra/docker-compose.yml exec -T timescaledb \
+--   docker compose --file infra/docker-compose.yml --project-name pwa-demo exec -T timescaledb \
 --       psql -U pwa -d pwa -f - < scripts/show-hypertable.sql
 --
 -- (or, inside psql:  \i scripts/show-hypertable.sql)
