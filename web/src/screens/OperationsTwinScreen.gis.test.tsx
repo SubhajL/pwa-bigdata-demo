@@ -92,6 +92,16 @@ const TOPOLOGY: TwinTopology = {
       status: "normal",
       simulated: true,
     },
+    {
+      asset_id: "P-9",
+      kind: "pump",
+      node: "P-9",
+      x: 340,
+      y: 300,
+      dma: "DMA-09",
+      status: "normal",
+      simulated: true,
+    },
   ],
   simulated: true,
 };
@@ -228,7 +238,12 @@ function stubFetch(
     }
     if (url.includes("/api/twin/topology")) return json(TOPOLOGY);
     if (url.includes("/api/twin/bands")) return json(BANDS);
-    if (url.includes("/api/twin/sec/")) return json(SEC);
+    if (url.includes("/api/twin/sec/")) {
+      // Echo the requested asset with a per-asset value, so a drifted selection is
+      // observable: the bound P-2 reads 0.253, any other pump reads 0.999.
+      const assetId = decodeURIComponent(url.split("/api/twin/sec/")[1].split(/[?#]/)[0]);
+      return json({ ...SEC, asset_id: assetId, sec_kwh_per_m3: assetId === "P-2" ? 0.253 : 0.999 });
+    }
     if (url.includes("/api/twin/impact/")) {
       return json({
         pipe_id: "PIPE-P2-TANK",
@@ -313,6 +328,33 @@ describe("OperationsTwinScreen GIS view", () => {
     fireEvent.click(screen.getByTestId("gis-device-marker"));
     await waitFor(() => expect(screen.getByTestId("gis-pipe-details")).toHaveTextContent("4926"));
     expect(screen.getByTestId("gis-pipe-details")).toHaveTextContent(/การจับคู่จำลอง/);
+  });
+
+  it("re-entering the GIS view re-selects the bound pump, even after another was selected", async () => {
+    // PR-R3 finding 5: SEC beside the fixed GIS binding must be the bound pump's, never a
+    // pump left selected in the logical view. The regression: selection snapped only on
+    // the FIRST fetch, so a later GIS entry kept the stale selection.
+    stubFetch();
+    render(<OperationsTwinScreen />);
+    await waitFor(() => expect(screen.getByRole("tablist")).toBeInTheDocument());
+
+    // First GIS entry: selection snaps to the bound P-2, energy card shows its SEC.
+    fireEvent.click(screen.getByRole("tab", { name: /แผนที่ GIS มาบตาพุด/ }));
+    await waitFor(() =>
+      expect(screen.getByTestId("energy-sec-live")).toHaveTextContent("0.253"),
+    );
+
+    // Back on the logical view, select a DIFFERENT pump.
+    fireEvent.click(screen.getByRole("tab", { name: /แผนผังกระบวนการ/ }));
+    fireEvent.click(screen.getByRole("button", { name: /P-9/ }));
+    await waitFor(() => expect(screen.getByTestId("sec-card")).toHaveTextContent("P-9"));
+
+    // Re-enter GIS: it must re-select the binding, not carry P-9's SEC beside real geometry.
+    fireEvent.click(screen.getByRole("tab", { name: /แผนที่ GIS มาบตาพุด/ }));
+    await waitFor(() =>
+      expect(screen.getByTestId("energy-sec-live")).toHaveTextContent("0.253"),
+    );
+    expect(screen.getByTestId("sec-card")).toHaveTextContent("P-2");
   });
 
   it("a late GIS arrival after switching back to logical must NOT snap the selection", async () => {

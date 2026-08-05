@@ -537,6 +537,41 @@ class BandsResponse(BaseModel):
 #: A property value the builder's allowlist can emit.
 GisPropertyValue = str | int | float | None
 
+#: The EXACT public property keys the builder's allowlist emits (snake_case), and the
+#: ONLY keys any served feature or the binding snapshot may carry. Cross-checked against
+#: the builder's `PROPERTY_ALLOWLIST.values()` by test_build_pipe_gis.py so the two can
+#: never drift. A re-signed bundle smuggling `remark`, `_createdBy`, mongo ids, or any
+#: other KEY — in `properties`, on a feature, inside `geometry`, or on the collection
+#: itself — is refused at serve time (docs/data/pipe-ry-provenance.md §3): the digest only
+#: proves bytes are unchanged, not that they stayed inside the reviewed surface. (Values
+#: within the allowlisted public columns ARE the public data, not a smuggle channel.)
+GIS_PUBLIC_PROPERTY_KEYS: frozenset[str] = frozenset(
+    {
+        "pipe_id",
+        "global_id",
+        "project_name",
+        "asset_code",
+        "pipe_type",
+        "grade",
+        "size_mm",
+        "pipe_class",
+        "function_id",
+        "laying_id",
+        "product_id",
+        "depth_m",
+        "length_m",
+        "year_installed",
+        "location",
+        "pwa_code",
+    }
+)
+
+#: The one PWA branch code the audited Rayong source carries on every record
+#: (docs/data/pipe-ry-provenance.md §Source). The builder enforces it before labelling a
+#: bundle REAL; the manifest records that it did, and this schema refuses a bundle whose
+#: audit claims any other branch — a different code is a different (wrong) shapefile.
+AUDITED_BRANCH_CODE = "5531021"
+
 #: THE official figure (docs/data/pipe-ry-provenance.md). One constant, one source of
 #: truth: `EnergyReference` refuses a manifest that deviates in ANY field, because a
 #: different value/unit/year/operator/source would be an unsourced energy claim in a
@@ -562,6 +597,40 @@ class GisFileDigest(BaseModel):
     bytes: int
 
 
+class GisSourceAudit(BaseModel):
+    """The source-identity contract the builder ENFORCED before labelling this bundle
+    REAL (rayong-pipe-gis-sec-plan; PR-R3 finding 2).
+
+    This is a BUILD-TIME assertion recorded in the manifest: the builder refused to emit
+    the bundle unless every record carried the audited branch code and `globalId` was
+    unique, and `_verify_source_audit_counts` cross-checks any pinned counts against the
+    served datasets. It is NOT serve-time tamper-evidence — the manifest is not itself
+    signed, so an adversary who controls both the bundle bytes and the manifest can
+    re-assert these two literals (PR-R3 QCHECK round 2). Authenticity of such a bundle
+    rests on the deployment trust boundary (permission-gated, operator-provisioned,
+    git-ignored; docs/data/pipe-ry-provenance.md §Permission/§Non-claims), not on this
+    schema. What this schema DOES guarantee: a bundle the honest builder produced cannot
+    lose its identity record, and one claiming a different branch or
+    `global_id_unique=false` is refused. `expected_full`/`expected_focus` record the count
+    contract when the operator pinned one (`--expect-full/--expect-focus`)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    branch_code: str
+    global_id_unique: Literal[True]
+    expected_full: int | None = None
+    expected_focus: int | None = None
+
+    @model_validator(mode="after")
+    def _branch_is_the_audited_one(self) -> GisSourceAudit:
+        if self.branch_code != AUDITED_BRANCH_CODE:
+            raise ValueError(
+                f"source audit branch {self.branch_code!r} is not the audited Rayong "
+                f"branch {AUDITED_BRANCH_CODE!r}"
+            )
+        return self
+
+
 class GisSource(BaseModel):
     """The audited source dataset the bundle was built from."""
 
@@ -572,6 +641,7 @@ class GisSource(BaseModel):
     output_crs: Literal["EPSG:4326"]
     feature_count: int = Field(gt=0)
     files: dict[str, GisFileDigest]
+    audit: GisSourceAudit
 
 
 class GisDatasetSummary(BaseModel):
@@ -603,6 +673,15 @@ class GisDemoBinding(BaseModel):
     midpoint_wgs84: list[float] = Field(min_length=2, max_length=2)
     placement: Literal["SIMULATED"]
     properties: dict[str, GisPropertyValue]
+
+    @model_validator(mode="after")
+    def _properties_within_allowlist(self) -> GisDemoBinding:
+        extra = set(self.properties) - GIS_PUBLIC_PROPERTY_KEYS
+        if extra:
+            raise ValueError(
+                f"demo binding exposes non-allowlisted properties: {sorted(extra)}"
+            )
+        return self
 
 
 class GisProvenance(BaseModel):

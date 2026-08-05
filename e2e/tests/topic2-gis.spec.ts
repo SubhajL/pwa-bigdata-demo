@@ -102,6 +102,15 @@ test.describe("real-bundle proofs (PIPE_GIS_ENABLED=1)", () => {
     await expect(view).toHaveAttribute("data-map-ready", "true", { timeout: 20_000 });
     await expect(view.locator("canvas")).toBeVisible();
     expect(await view.locator("img").count()).toBe(0);
+    // Source-ingestion proof (PR-R3 finding 6): the number of DISTINCT real pipes MapLibre
+    // actually parsed into its source must equal the manifest's audited focus count —
+    // proving the 19 features reached the map's source, not merely that a canvas exists.
+    // (This certifies ingestion, not painting; the non-zero line width is unit-asserted.)
+    await expect(view).toHaveAttribute(
+      "data-source-features",
+      String(manifest.datasets["map-ta-phut"].feature_count),
+      { timeout: 20_000 },
+    );
     await expect(view).toHaveAttribute(
       "data-bound-pipe",
       String(manifest.demo_binding.pipe_id),

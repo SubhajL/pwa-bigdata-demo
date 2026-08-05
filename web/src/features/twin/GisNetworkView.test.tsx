@@ -25,8 +25,12 @@ vi.mock("maplibre-gl", () => {
     onceHandlers = new Map<string, Handler[]>();
     layerClicks: Array<{ layer: string; handler: Handler }> = [];
     layers: Array<Record<string, unknown>> = [];
+    sources: Record<string, { data?: { features?: unknown[] } }> = {};
     removeThrows = false;
-    addSource = vi.fn();
+    addSource = vi.fn((id: string, spec: { data?: { features?: unknown[] } }) => {
+      this.sources[id] = spec;
+    });
+    querySourceFeatures = vi.fn((id: string) => this.sources[id]?.data?.features ?? []);
     addLayer = vi.fn((spec: Record<string, unknown>) => {
       this.layers.push(spec);
     });
@@ -63,11 +67,11 @@ vi.mock("maplibre-gl", () => {
       this.onceHandlers.set(event, list);
       return this;
     }
-    fire(event: string): void {
-      for (const handler of this.handlers.get(event) ?? []) handler({});
+    fire(event: string, payload: unknown = {}): void {
+      for (const handler of this.handlers.get(event) ?? []) handler(payload);
       const once = this.onceHandlers.get(event) ?? [];
       this.onceHandlers.set(event, []);
-      for (const handler of once) handler({});
+      for (const handler of once) handler(payload);
     }
   }
   class MockMarker {
@@ -106,7 +110,7 @@ interface MockMapInstance {
   fitBounds: ReturnType<typeof vi.fn>;
   remove: ReturnType<typeof vi.fn>;
   layerClicks: Array<{ layer: string; handler: (event: unknown) => void }>;
-  fire: (event: string) => void;
+  fire: (event: string, payload?: unknown) => void;
 }
 
 interface MockedMaplibre {
@@ -258,7 +262,11 @@ describe("GisNetworkView", () => {
       expect(
         Object.keys(layer.paint).every((key) => ["line-color", "line-width"].includes(key)),
       ).toBe(true);
+      // A POSITIVE width — a zero width would ingest every feature yet paint nothing, so
+      // the source-ingestion proof (data-source-features) is not a visibility proof; this
+      // is the paint guard against invisible linework (QCHECK round 1).
       expect(typeof layer.paint["line-width"]).toBe("number");
+      expect(layer.paint["line-width"] as number).toBeGreaterThan(0);
     }
     expect(base.id).toBe("pipe-ry-line");
     expect(highlight.id).toBe("pipe-ry-highlight");
@@ -276,6 +284,30 @@ describe("GisNetworkView", () => {
     await waitFor(() => expect(view).toHaveAttribute("data-map-ready", "true"));
     // Readiness implies the layers actually installed — not just that load fired.
     expect(map.layers).toHaveLength(2);
+  });
+
+  it("publishes the DISTINCT source feature count once the source loads (render proof)", async () => {
+    renderView();
+    const map = await mountedMap();
+    const view = screen.getByTestId("gis-network-view");
+    // Before the source loads there is no honest count to publish.
+    expect(view).toHaveAttribute("data-source-features", "");
+    act(() => map.fire("load"));
+    act(() => map.fire("sourcedata", { sourceId: "pipe-ry", isSourceLoaded: true }));
+    // NETWORK carries one feature (pipe_id 4926); the count is read from the source cache.
+    await waitFor(() =>
+      expect(view).toHaveAttribute("data-source-features", "1"),
+    );
+  });
+
+  it("ignores sourcedata for other sources and before the source is loaded", async () => {
+    renderView();
+    const map = await mountedMap();
+    const view = screen.getByTestId("gis-network-view");
+    act(() => map.fire("load"));
+    act(() => map.fire("sourcedata", { sourceId: "some-other-source", isSourceLoaded: true }));
+    act(() => map.fire("sourcedata", { sourceId: "pipe-ry", isSourceLoaded: false }));
+    expect(view).toHaveAttribute("data-source-features", "");
   });
 
   it("updates the highlight filter in place when the drop state changes", async () => {

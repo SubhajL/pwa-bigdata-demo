@@ -54,6 +54,14 @@ export function GisNetworkView({
   // A pre-load ErrorEvent (e.g. GPUInitializationError on a machine without WebGL2)
   // means the map will NEVER load; the failure must be explicit, never a blank box.
   const [mapFailed, setMapFailed] = useState(false);
+  // Source-INGESTION proof: the number of DISTINCT source pipes MapLibre actually parsed
+  // into its source cache, read once `sourcedata` reports the source loaded. This proves
+  // the REAL geometry REACHED the map's source (an empty/blank source can never reach the
+  // manifest's feature count) — it is NOT a proof of visible painting (e.g. a zero line
+  // width would still ingest 19 features; the base line width is asserted > 0 in the unit
+  // test as the paint guard). Read via `sourcedata`, not `idle`, which headless
+  // software-GL can starve indefinitely (QCHECK round 1 relabelled this honestly).
+  const [sourceFeatureCount, setSourceFeatureCount] = useState<number | null>(null);
   // Callbacks/props the mount-once effect reads live via refs, so a parent re-render
   // never tears down the map. The ref is written in an effect (not during render —
   // react-hooks/refs), which is early enough: map events cannot fire before effects.
@@ -125,6 +133,19 @@ export function GisNetworkView({
         const raw: unknown = event.features?.[0]?.properties?.pipe_id;
         selectRef.current(typeof raw === "number" ? raw : null);
       });
+      // Source-ingestion proof (PR-R3 finding 6): when the source finishes loading, count
+      // the DISTINCT pipe ids MapLibre parsed (dedup across internal tiles) and keep the
+      // running maximum — progressive tile loads can only reveal more, never fewer.
+      map.on("sourcedata", (event: maplibregl.MapSourceDataEvent) => {
+        if (event.sourceId !== GIS_CONFIG.sourceId || !event.isSourceLoaded) return;
+        const parsed = map.querySourceFeatures(GIS_CONFIG.sourceId);
+        const ids = new Set<number>();
+        for (const feature of parsed) {
+          const pipeId: unknown = feature.properties?.pipe_id;
+          if (typeof pipeId === "number") ids.add(pipeId);
+        }
+        setSourceFeatureCount((previous) => Math.max(previous ?? 0, ids.size));
+      });
       setLoaded(true);
       setReady(true);
     });
@@ -168,7 +189,9 @@ export function GisNetworkView({
       }
       mapRef.current = null;
     };
-  }, []);
+    // `markerEl` is a stable useState value (created once), so the mount-once map is not
+    // torn down by re-renders; listing it satisfies exhaustive-deps without changing that.
+  }, [markerEl]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -185,6 +208,7 @@ export function GisNetworkView({
       data-bound-pipe={manifest.demo_binding.pipe_id}
       data-highlighted-pipes={highlightedPipeIds.join(",")}
       data-map-ready={ready}
+      data-source-features={sourceFeatureCount ?? ""}
       className="relative h-[560px] w-full overflow-hidden rounded-lg border border-outline-variant"
     >
       <div
