@@ -381,7 +381,15 @@ test("P1 — a low-pressure incident is clickable to exactly 200 inspectable cus
     // Step 4 (alternate entry) — the highlighted PIPE opens the SAME drawer/incident.
     await drawer.getByTestId("customer-close").click();
     await expect(drawer).toHaveCount(0);
-    await page.getByTestId("affected-pipe").first().click();
+    // Activate the highlighted pipe via its keyboard button contract (role="button", tabIndex=0,
+    // Enter → onOpenImpact), NOT a mouse click: a horizontal SVG <line> reports a zero-height
+    // getBoundingClientRect, so Playwright's click visibility gate rejects it as "not visible"
+    // even though it paints and is operable. The mouse onClick path is covered in jsdom by
+    // web/src/screens/OperationsTwinScreen.impact.test.tsx. This proves the pipe opens the SAME
+    // 200-incident drawer as the footprint, geometry-independent of which segment is first.
+    const affectedPipe = page.getByTestId("affected-pipe").first();
+    await affectedPipe.focus();
+    await affectedPipe.press("Enter");
     await expect(page.getByTestId("impact-drawer")).toBeVisible();
     await expect(page.getByTestId("impact-drawer").getByTestId("impact-count")).toContainText("200");
 
