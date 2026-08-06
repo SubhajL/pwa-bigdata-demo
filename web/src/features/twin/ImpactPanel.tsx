@@ -12,9 +12,9 @@ export interface ImpactPanelProps {
 
 /**
  * The customers downstream of a dropped pipe (scored item 2.4). The count is the API's real
- * value (5 upstream of the seeded line, 2 for the last leg) — NEVER the Stitch mockup's
- * fabricated "1,204". Every value here is API-derived SIMULATED data (a generated topology and
- * generated customer ids), so the panel carries a SIMULATED marker and the count uses `Num`.
+ * value (PR-I: 200 upstream of the Map Ta Phut line, 80 for the last leg) — NEVER the Stitch
+ * mockup's fabricated "1,204". Every value here is API-derived SIMULATED data (a generated
+ * topology and generated customer ids), so the panel carries a SIMULATED marker and uses `Num`.
  */
 export function ImpactPanel({ impact, loading }: ImpactPanelProps): JSX.Element {
   return (

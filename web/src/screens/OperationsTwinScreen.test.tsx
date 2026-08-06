@@ -41,8 +41,8 @@ const IMPACT: ImpactResponse = {
   pipe_id: "PIPE-P2-TANK",
   affected_pipe_ids: ["PIPE-P2-TANK", "PIPE-TANK-N1"],
   customers: [
-    { customer_id: "72-1-00001", node: "n1", area: "ต.ท่าจีน", branch: "สมุทรสาคร" },
-    { customer_id: "72-1-00003", node: "n1", area: "ต.ท่าจีน", branch: "สมุทรสาคร" },
+    { customer_id: "SIM-MTP-00001", node: "n1", area: "ต.มาบตาพุด อ.เมืองระยอง จ.ระยอง", branch: "กปภ.สาขาบ้านฉาง (จำลอง)" },
+    { customer_id: "SIM-MTP-00003", node: "n1", area: "ต.มาบตาพุด อ.เมืองระยอง จ.ระยอง", branch: "กปภ.สาขาบ้านฉาง (จำลอง)" },
   ],
   count: 2,
   simulated: true,
@@ -170,8 +170,9 @@ describe("R8 — pressure DROP highlights the pipe and lists customers; a spike 
     await mountLoaded();
     act(() => sockets[0].open());
     act(() => sockets[0].send({ kind: "status", asset_id: "P-2", status: "warning", signal: "pressure_bar", value: 1.0 }));
-    // The affected customer count is the API's (2), never the mockup's 1,204.
-    expect(await screen.findByText("72-1-00001")).toBeInTheDocument();
+    // The affected-customer count comes from the API response (this test's mock supplies 2),
+    // never the Stitch mockup's fabricated 1,204. (The live API is now the 200/80 MTP set; PR-J.)
+    expect(await screen.findByText("SIM-MTP-00001")).toBeInTheDocument();
     expect(screen.queryByText(/1,?204/)).toBeNull();
     await waitFor(() => {
       expect(document.querySelector('[data-pipe="PIPE-P2-TANK"]')!.getAttribute("data-affected")).toBe("true");
