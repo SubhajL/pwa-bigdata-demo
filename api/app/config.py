@@ -86,6 +86,17 @@ class Settings(BaseSettings):
     #: leaves growth room while refusing to stream an absurd or swapped file.
     pipe_gis_max_bytes: int = 50_000_000
 
+    #: The Map Ta Phut 200-customer low-pressure impact surface (PR-I). Default OFF. The
+    #: schema (migration 007) and the 200-account seed always land — they are just more
+    #: SIMULATED data — but the ENRICHED impact detail, the per-customer route, and the
+    #: impact-zone route stay dark until this is on. Off, those routes answer 404 and the
+    #: impact list keeps its basic shape; it NEVER falls back to the old five rows.
+    mtp_customer_impact_enabled: bool = False
+
+    #: Which versioned customer profile the impact/detail/zone surface serves. Equals
+    #: `demo_customer_profile.profile_version` and the default impact-zone scenario id.
+    mtp_customer_profile: str = "mtp-low-pressure-200-v1"
+
     #: Comma-separated browser origins allowed to call this API cross-origin.
     #:
     #: Defaulted, not required, so every existing `Settings()` call site keeps working.
@@ -123,6 +134,19 @@ class Settings(BaseSettings):
     @classmethod
     def _fill_run_id(cls, value: str) -> str:
         return value if value.strip() else _default_run_id()
+
+    @field_validator("mtp_customer_profile")
+    @classmethod
+    def _known_profile(cls, value: str) -> str:
+        """Exactly one profile is seeded. Reject any other value at startup (fail-closed) rather
+        than silently serving an empty enriched impact / passing preflight while the API returns
+        zero customers (g2-qcheck round 4, Codex). A future v2 updates this literal + the seed.
+        The equality test pins this to the generator's `MTP_PROFILE_VERSION` so they cannot drift.
+        """
+        supported = "mtp-low-pressure-200-v1"
+        if value != supported:
+            raise ValueError(f"MTP_CUSTOMER_PROFILE must be {supported!r}, got {value!r}")
+        return value
 
 
 def get_settings() -> Settings:

@@ -22,11 +22,11 @@ from app.db import latest_signal_pair
 PUMP = "P-2"
 
 
-@pytest.fixture
-def client(timescale_dsn: str, monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    monkeypatch.setenv("DATABASE_URL", timescale_dsn)
+def _build_client(dsn: str, monkeypatch: pytest.MonkeyPatch, *, mtp: bool) -> TestClient:
+    monkeypatch.setenv("DATABASE_URL", dsn)
     monkeypatch.setenv("MQTT_ENABLED", "0")
     monkeypatch.setenv("SCORING_ENABLED", "0")
+    monkeypatch.setenv("MTP_CUSTOMER_IMPACT_ENABLED", "1" if mtp else "0")
     import importlib
     import sys
 
@@ -34,6 +34,18 @@ def client(timescale_dsn: str, monkeypatch: pytest.MonkeyPatch) -> TestClient:
         sys.modules.pop(name, None)
     module = importlib.import_module("app.main")
     return TestClient(module.app)
+
+
+@pytest.fixture
+def client(timescale_dsn: str, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """The API with the Map Ta Phut customer feature OFF (the default)."""
+    return _build_client(timescale_dsn, monkeypatch, mtp=False)
+
+
+@pytest.fixture
+def mtp_client(timescale_dsn: str, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """The API with `MTP_CUSTOMER_IMPACT_ENABLED=1` — enriched impact + detail/zone routes live."""
+    return _build_client(timescale_dsn, monkeypatch, mtp=True)
 
 
 def _insert(pool: ConnectionPool, asset: str, signal: str, value: float, ts: datetime) -> None:
@@ -168,15 +180,165 @@ def test_topology_route_serves_geometry_from_the_database(client: TestClient) ->
     assert body["simulated"] is True
 
 
-def test_impact_route_returns_the_hand_computed_set(client: TestClient) -> None:
+def test_impact_route_is_basic_and_never_the_five_when_feature_off(client: TestClient) -> None:
+    """Feature off (the default): the last leg's 80 accounts, basic shape, enriched fields null,
+    and NEVER the retired five 72-1-* rows."""
     with client:
         response = client.get("/api/twin/impact/PIPE-N1-N2")
     assert response.status_code == 200
     body = response.json()
-    assert {c["customer_id"] for c in body["customers"]} == {"72-1-00002", "72-1-00004"}
-    assert body["count"] == 2
+    assert body["count"] == 80
+    assert body["type_breakdown"] is None, "enriched breakdown must be null when the feature is off"
+    assert body["zone"] is None
+    assert all(not c["customer_id"].startswith("72-1-") for c in body["customers"])
+    assert all(c["type_code"] is None for c in body["customers"]), "enriched fields null when off"
     with client:
         assert client.get("/api/twin/impact/PIPE-NOPE").status_code == 404
+
+
+def test_impact_route_is_enriched_when_feature_on(mtp_client: TestClient) -> None:
+    with mtp_client:
+        response = mtp_client.get("/api/twin/impact/PIPE-TANK-V9")
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["customers"]) == body["count"] == 200
+    assert body["zone"] == "MTP-LPZ-01"
+    assert body["type_breakdown"] == {"type_1": 140, "type_2": 35, "type_3": 25}
+    # EVERY affected account carries ALL its enriched fields, not just type_code (Codex §3).
+    assert all(
+        c["type_code"] is not None and c["subtype_code"] is not None
+        and c["account_no"] is not None and c["meter_no"] is not None
+        and c["latest_usage_m3"] is not None
+        for c in body["customers"]
+    )
+
+
+def test_customer_detail_returns_twelve_consistent_readings(mtp_client: TestClient) -> None:
+    with mtp_client:
+        response = mtp_client.get("/api/twin/customers/SIM-MTP-00001")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["customer_id"] == "SIM-MTP-00001"
+    assert body["account_no"] == "SIM-MTP-ACC-00001"
+    assert body["profile_version"] == "mtp-low-pressure-200-v1"
+    periods = [r["period"] for r in body["readings"]]
+    assert len(periods) == 12 and periods == sorted(periods) and len(set(periods)) == 12
+    for r in body["readings"]:
+        assert r["usage_m3"] == r["reading_m3"] - r["previous_reading_m3"]
+
+
+def test_customer_detail_rejects_unknown_and_non_demo_ids(mtp_client: TestClient) -> None:
+    with mtp_client:
+        assert mtp_client.get("/api/twin/customers/NOPE").status_code == 404
+        assert mtp_client.get("/api/twin/customers/72-1-00001").status_code == 404
+
+
+def test_customer_detail_is_404_for_every_id_when_feature_off(client: TestClient) -> None:
+    with client:
+        assert client.get("/api/twin/customers/SIM-MTP-00001").status_code == 404
+
+
+def test_customer_detail_maps_a_data_integrity_error_to_503(
+    mtp_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stored history that is not 12 continuous months raises ValueError in the topology layer;
+    the route must surface a CONTROLLED 503, never a bare 500 traceback (g2-qcheck round 2)."""
+    from app import topology
+
+    def _raise(*_args: object, **_kwargs: object) -> object:
+        raise ValueError("corrupt history")
+
+    monkeypatch.setattr(topology, "get_demo_customer_detail", _raise)
+    with mtp_client:
+        response = mtp_client.get("/api/twin/customers/SIM-MTP-00001")
+    assert response.status_code == 503
+
+
+def test_impact_zone_is_simulated_geojson(mtp_client: TestClient) -> None:
+    with mtp_client:
+        response = mtp_client.get(
+            "/api/twin/gis/impact-zones?scenario_id=mtp-low-pressure-200-v1"
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["type"] == "FeatureCollection"
+    assert body["provenance"] == "SIMULATED_LOW_PRESSURE_FOOTPRINT"
+    assert body["zone_id"] == "MTP-LPZ-01"
+    assert len(body["features"]) == 1  # exactly the one simulated footprint polygon
+    assert body["features"][0]["geometry"]["type"] == "Polygon"
+    assert body["features"][0]["properties"]["simulated"] is True
+
+
+def test_impact_zone_defaults_to_active_profile_and_rejects_unknown(
+    mtp_client: TestClient,
+) -> None:
+    with mtp_client:
+        assert mtp_client.get("/api/twin/gis/impact-zones").status_code == 200
+        assert mtp_client.get("/api/twin/gis/impact-zones?scenario_id=nope").status_code == 404
+
+
+def test_impact_zone_is_404_when_feature_off(client: TestClient) -> None:
+    with client:
+        assert client.get("/api/twin/gis/impact-zones").status_code == 404
+
+
+def test_new_routes_and_enriched_schema_are_documented_in_openapi(client: TestClient) -> None:
+    with client:
+        spec = client.get("/openapi.json").json()
+    paths = spec["paths"]
+    assert "/api/twin/customers/{customer_id}" in paths
+    assert "/api/twin/gis/impact-zones" in paths
+    schemas = spec["components"]["schemas"]
+    assert "type_breakdown" in schemas["ImpactResponse"]["properties"]
+    assert "DemoCustomerDetail" in schemas
+    assert "readings" in schemas["DemoCustomerDetail"]["properties"]
+    assert "ImpactZoneCollection" in schemas
+
+
+def test_web_contract_fixture_matches_openapi(client: TestClient) -> None:
+    """The committed TS fixture PR-J builds against must be a strict subset of the live
+    FastAPI schema — so the Python models and the TypeScript interfaces cannot drift apart
+    (Codex 0.8). Combined with web mtpContract.test.ts this pins Python <-> fixture <-> TS."""
+    import json
+    import pathlib
+
+    repo_root = pathlib.Path(__file__).resolve().parents[2]
+    fixture = json.loads(
+        (repo_root / "web/src/features/twin/__fixtures__/mtp-contract.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    with client:
+        schemas = client.get("/openapi.json").json()["components"]["schemas"]
+
+    def keys_equal(obj: dict[str, object], schema_name: str) -> None:
+        # EXACT set equality (not subset): catches a new OR missing OpenAPI field in either
+        # direction, so the fixture PR-J builds against cannot silently drift (Codex §7).
+        fixture_keys = set(obj)
+        schema_keys = set(schemas[schema_name]["properties"])
+        assert fixture_keys == schema_keys, (
+            f"{schema_name}: fixture {sorted(fixture_keys)} != OpenAPI {sorted(schema_keys)}"
+        )
+
+    impact = fixture["impact"]
+    keys_equal(impact, "ImpactResponse")
+    keys_equal(impact["type_breakdown"], "TypeBreakdown")
+    keys_equal(fixture["detail"], "DemoCustomerDetail")
+    keys_equal(fixture["zone"], "ImpactZoneCollection")
+    # Every array member, not just [0] — an extra key on customer 2 would evade a [0]-only check
+    # (g2-qcheck round 4, Codex).
+    for customer in impact["customers"]:
+        keys_equal(customer, "AffectedCustomer")
+    for reading in fixture["detail"]["readings"]:
+        keys_equal(reading, "DemoMeterReading")
+    for feature in fixture["zone"]["features"]:
+        keys_equal(feature, "ImpactZoneFeature")
+
+    assert impact["count"] == 200
+    assert len(impact["customers"]) == impact["count"]  # the fixture is the FULL response
+    breakdown = impact["type_breakdown"]
+    assert breakdown["type_1"] + breakdown["type_2"] + breakdown["type_3"] == 200
+    assert len(fixture["detail"]["readings"]) == 12
 
 
 # ── T9: the new query shape must not scan history ─────────────────────────────────────

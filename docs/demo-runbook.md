@@ -112,6 +112,16 @@ ordered rows.
 > **`make demo-preflight`**, or simply
 > press **จำลองแรงดันตก** on the twin (§0b) — it steers the window deterministically at any stack age.
 
+> **Affected customers (2.4) — the 200-account Map Ta Phut set (PR-I).** The seed now lands exactly
+> **200 SIMULATED** Map Ta Phut / Ban Chang service accounts (140 / 35 / 25 type mix, 2,400 monthly
+> readings) in place of the five Samut Sakhon rows — 120 on the first service node and 80 on the
+> last, so the upstream corridor impacts all 200 and the last leg 80. PR-I lands the BACKEND dark:
+> the enriched impact response, the customer-detail route (`GET /api/twin/customers/{id}`), and the
+> impact-zone route are all gated behind `MTP_CUSTOMER_IMPACT_ENABLED` (default **off**); with the
+> flag off the impact card still shows the 200 as a basic list. The clickable low-pressure footprint
+> and the per-account drawer UI arrive with PR-J. Provenance and privacy:
+> `docs/data/map-ta-phut-customer-profile.md`.
+
 ### Optional GIS view — แผนที่ GIS มาบตาพุด (PR-H, ships DARK)
 
 The `/operations` screen carries a second tab, **แผนที่ GIS มาบตาพุด**: real Rayong pipe

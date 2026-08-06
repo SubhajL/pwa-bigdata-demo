@@ -26,9 +26,10 @@ E2E_TESTS = REPO / "e2e" / "tests"
 MAKEFILE = REPO / "Makefile"
 PREFLIGHT = REPO / "scripts" / "demo-preflight.sh"
 PANEL = REPO / "web" / "src" / "features" / "twin" / "DemoScenarioPanel.tsx"
+MTP_DOC = REPO / "docs" / "data" / "map-ta-phut-customer-profile.md"
 
 #: Judge-facing files whose prose may describe the seeded/affected customer list.
-_CUSTOMER_CLAIM_FILES = (RUNBOOK, COVERAGE, E2E_README, PREFLIGHT)
+_CUSTOMER_CLAIM_FILES = (RUNBOOK, COVERAGE, E2E_README, PREFLIGHT, MTP_DOC)
 
 
 def _read(path: Path) -> str:
@@ -286,3 +287,21 @@ def test_bad_asset_narration_names_direct_injection() -> None:
     assert re.search(r"MODE=bad_asset", runbook), (
         "docs/demo-runbook.md must keep the real MQTT bad-asset trigger for item 1.5"
     )
+
+
+def test_compose_forwards_the_mtp_customer_vars() -> None:
+    """R19: the API container must forward BOTH MTP settings, or a deployed API silently loses the
+    feature flag / profile that route tests set directly in the process env (g2-qcheck round 4)."""
+    compose = _read(REPO / "infra" / "docker-compose.yml")
+    assert "MTP_CUSTOMER_IMPACT_ENABLED:" in compose
+    assert "MTP_CUSTOMER_PROFILE:" in compose
+
+
+def test_provenance_doc_discloses_the_branch_and_device_seams() -> None:
+    """R20: the 5531021 (Rayong GIS) vs 5531022 (Ban Chang service) mismatch AND the P-2/V-9
+    device-roster seam must stay disclosed — deleting the disclosure must fail here, which the
+    'no real customer' guard alone would not catch (g2-qcheck round 4, Codex)."""
+    doc = _read(MTP_DOC)
+    assert "5531021" in doc and "5531022" in doc, "branch-code mismatch disclosure missing"
+    assert "P-2" in doc and "V-9" in doc, "device-roster seam disclosure missing"
+    assert "SIMULATED" in doc, "the binding must be disclosed as simulated"

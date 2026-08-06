@@ -16,8 +16,10 @@ from ..bands import SIGNAL_BANDS
 from ..gis import GisBundle, build_cache_headers, etag_matches
 from ..models import (
     BandsResponse,
+    DemoCustomerDetail,
     GisManifest,
     ImpactResponse,
+    ImpactZoneCollection,
     SecResponse,
     SignalBand,
     TwinTopology,
@@ -241,10 +243,85 @@ def twin_impact(request: Request, pipe_id: str) -> ImpactResponse:
     if pool is None:
         raise HTTPException(status_code=503, detail="database not configured")
 
+    # When the Map Ta Phut feature is on, the response carries per-account profile detail and a
+    # type breakdown; off, it stays the basic shape (never the old five rows).
+    settings = getattr(request.app.state, "settings", None)
+    enriched = bool(getattr(settings, "mtp_customer_impact_enabled", False))
+    profile_version = getattr(settings, "mtp_customer_profile", None)
     try:
-        return downstream_customers(pool, pipe_id)
+        return downstream_customers(
+            pool, pipe_id, enriched=enriched, profile_version=profile_version
+        )
     except KeyError:
         raise HTTPException(status_code=404, detail=f"unknown pipe {pipe_id!r}") from None
+
+
+def _mtp_customer_impact_enabled(request: Request) -> bool:
+    """Is the Map Ta Phut customer-impact feature on? Off → detail/zone routes 404 (dark)."""
+    settings = getattr(request.app.state, "settings", None)
+    return bool(getattr(settings, "mtp_customer_impact_enabled", False))
+
+
+@router.get(
+    "/api/twin/customers/{customer_id}",
+    response_model=DemoCustomerDetail,
+    summary="One simulated Map Ta Phut account + 12 monthly readings (PR-I, item 2.4)",
+)
+def twin_customer_detail(request: Request, customer_id: str) -> DemoCustomerDetail:
+    """One SIMULATED account's profile and full 12-month reading history.
+
+    Fail-closed: 404 for EVERY id when the feature is off (the surface simply does not exist),
+    and 404 for an unknown or non-demo id when it is on.
+
+    Raises:
+        HTTPException: 404 when disabled or the id is not a demo customer; 503 when the DB is
+            not configured.
+    """
+    from ..topology import get_demo_customer_detail
+
+    if not _mtp_customer_impact_enabled(request):
+        raise HTTPException(status_code=404, detail="customer impact feature is not enabled")
+    pool = getattr(request.app.state, "pool", None)
+    if pool is None:
+        raise HTTPException(status_code=503, detail="database not configured")
+    profile_version = request.app.state.settings.mtp_customer_profile
+    try:
+        return get_demo_customer_detail(pool, customer_id, profile_version=profile_version)
+    except KeyError:
+        raise HTTPException(
+            status_code=404, detail=f"unknown demo customer {customer_id!r}"
+        ) from None
+    except ValueError as exc:
+        # A stored history that is not exactly 12 continuous months is a data-integrity failure,
+        # not a missing customer — fail closed with a controlled 503, never a bare 500 traceback
+        # (g2-qcheck round 2, Codex).
+        raise HTTPException(
+            status_code=503, detail="customer detail data integrity error"
+        ) from exc
+
+
+@router.get(
+    "/api/twin/gis/impact-zones",
+    response_model=ImpactZoneCollection,
+    summary="Simulated low-pressure footprint (PR-I): a clickable zone, never real geometry",
+)
+def twin_impact_zones(
+    request: Request, scenario_id: str | None = None
+) -> ImpactZoneCollection:
+    """The SIMULATED low-pressure footprint (GeoJSON). Defaults to the active profile's scenario.
+
+    Raises:
+        HTTPException: 404 when the feature is off or the scenario id is unknown.
+    """
+    from ..topology import load_impact_zone
+
+    if not _mtp_customer_impact_enabled(request):
+        raise HTTPException(status_code=404, detail="customer impact feature is not enabled")
+    resolved = scenario_id or request.app.state.settings.mtp_customer_profile
+    try:
+        return load_impact_zone(resolved)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"unknown scenario {resolved!r}") from None
 
 
 # ── Rayong pipe-GIS bundle (PR-G, criterion 2 realism) ─────────────────────────────────

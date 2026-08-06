@@ -25,7 +25,16 @@ sys.path.insert(0, str(ROOT / "simulator"))
 
 from app.config import get_settings  # noqa: E402
 from app.models import Device  # noqa: E402
-from app.roster import DEMO_BRANCH, load_devices  # noqa: E402
+from app.roster import load_devices  # noqa: E402
+
+# scripts/ is on sys.path (this file's directory) when run as `python scripts/seed_db.py`.
+from map_ta_phut_customer_profile import (  # noqa: E402
+    DemoCustomerProfileSeed,
+    DemoMeterReadingSeed,
+    build_map_ta_phut_profiles,
+    build_monthly_readings,
+    validate_demo_customer_profile,
+)
 
 
 def curated_path() -> pathlib.Path:
@@ -88,20 +97,27 @@ RETIRED_EDGES: list[tuple[str, str, str]] = [
     ("PIPE-TANK-N1", "tank", "n1"),
 ]
 
+#: The five legacy Samut Sakhon demo service points this seed once wrote, as the COMPLETE owned
+#: set. They are deleted and REPLACED by the 200 Map Ta Phut accounts — never restored as a
+#: fallback (PR-I: "no five-row fallback"). Listed explicitly so the seed retires exactly what it
+#: owns and nothing an operator added, the same discipline as RETIRED_EDGES.
+RETIRED_CUSTOMERS: list[str] = [f"72-1-{n:05d}" for n in range(1, 6)]
+
 #: Devices that sit ON the seeded DMA-03 line, mapped to their node.
 #: P-1 (DMA-01) and M-3 (DMA-02) are deliberately absent: they belong to other DMAs, and
 #: inventing topology for them would fabricate a network that does not exist.
 DEVICE_NODES: dict[str, str] = {"P-2": "P-2", "V-9": "V-9"}
 
 
-def _topology() -> tuple[list[tuple[object, ...]], list[tuple[str, str, str, str]]]:
+def _topology() -> list[tuple[object, ...]]:
     """DMA-03 line: intake -> P-2 -> tank -> V-9 -> n1 -> n2.
 
-    Customers hang off n1 and n2, so a pressure drop upstream of either has a real,
-    computable set of affected service points (scored item 2.4).
+    The 200 Map Ta Phut accounts hang off n1 (120) and n2 (80) — seeded by
+    `seed_demo_customer_profiles`, NOT here — so an upstream-corridor pressure drop reaches all
+    200 and the last leg (PIPE-N1-N2) reaches only its 80 (scored item 2.4).
 
-    SIMULATED: the topology, the coordinates and the five customer ids are all generated.
-    No real customer PII is present. Only `branch` comes from the real curated roster.
+    SIMULATED: the topology and coordinates are generated. Only `branch` on the real devices
+    comes from the curated roster. This function produces NO customer rows.
     """
     edges = [
         ("PIPE-INTAKE", "intake", "P-2"),
@@ -115,18 +131,59 @@ def _topology() -> tuple[list[tuple[object, ...]], list[tuple[str, str, str, str
         x1, y1 = NODE_LAYOUT[from_node]
         x2, y2 = NODE_LAYOUT[to_node]
         pipes.append((pipe_id, from_node, to_node, "DMA-03", x1, y1, x2, y2))
+    return pipes
 
-    customers = [
-        (f"72-1-{n:05d}", "n1" if n % 2 else "n2", "ต.ท่าจีน", DEMO_BRANCH)
-        for n in range(1, 6)
-    ]
-    return pipes, customers
+
+def seed_demo_customer_profiles(
+    cur: psycopg.Cursor[tuple[object, ...]],
+    profiles: list[DemoCustomerProfileSeed],
+    readings: list[DemoMeterReadingSeed],
+) -> None:
+    """Retire the five owned legacy rows and seed the 200 Map Ta Phut accounts + 2,400 readings.
+
+    Deletes ONLY `RETIRED_CUSTOMERS` (the complete owned set) — a seed retires what it wrote,
+    never a row it does not own. Idempotent: every insert is ON CONFLICT DO NOTHING, so a re-run
+    lands the same 200/2,400 with no churn. Parent order is service point -> profile -> reading,
+    matching the migration-007 foreign keys.
+    """
+    cur.execute(
+        "DELETE FROM customer_service_point WHERE customer_id = ANY(%s)",
+        (RETIRED_CUSTOMERS,),
+    )
+    cur.executemany(
+        "INSERT INTO customer_service_point (customer_id, node, area, branch) "
+        "VALUES (%s,%s,%s,%s) ON CONFLICT (customer_id) DO NOTHING",
+        [(p.customer_id, p.node, p.area, p.branch) for p in profiles],
+    )
+    cur.executemany(
+        "INSERT INTO demo_customer_profile (customer_id, account_no, meter_no, type_code, "
+        "subtype_code, meter_size, pressure_zone_id, address_label, profile_version, simulated) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (customer_id) DO NOTHING",
+        [
+            (p.customer_id, p.account_no, p.meter_no, p.type_code, p.subtype_code, p.meter_size,
+             p.pressure_zone_id, p.address_label, p.profile_version, p.simulated)
+            for p in profiles
+        ],
+    )
+    cur.executemany(
+        "INSERT INTO demo_customer_meter_reading "
+        "(customer_id, period, previous_reading_m3, reading_m3, usage_m3) "
+        "VALUES (%s,%s,%s,%s,%s) ON CONFLICT (customer_id, period) DO NOTHING",
+        [
+            (r.customer_id, r.period, r.previous_reading_m3, r.reading_m3, r.usage_m3)
+            for r in readings
+        ],
+    )
 
 
 def main() -> None:
     dsn = os.environ.get("DATABASE_URL", "postgresql://pwa:pwa@localhost:5433/pwa")
     devices = device_rows()
-    pipes, customers = _topology()
+    pipes = _topology()
+    profiles = build_map_ta_phut_profiles()
+    readings = build_monthly_readings(profiles)
+    # Fail-closed BEFORE opening a write transaction: a drifted count/mix/prefix aborts the seed.
+    validate_demo_customer_profile(profiles, readings)
     with psycopg.connect(dsn) as conn, conn.cursor() as cur:
         cur.executemany(DEVICE_INSERT, devices)
         # DO UPDATE, not DO NOTHING: an existing demo volume already holds the pre-S4a
@@ -159,11 +216,8 @@ def main() -> None:
             "DELETE FROM pipe_edge WHERE pipe_id = %s AND from_node = %s AND to_node = %s",
             RETIRED_EDGES,
         )
-        cur.executemany(
-            "INSERT INTO customer_service_point (customer_id, node, area, branch) "
-            "VALUES (%s,%s,%s,%s) ON CONFLICT (customer_id) DO NOTHING",
-            customers,
-        )
+        # Retire the five legacy service points and seed the 200 Map Ta Phut accounts + readings.
+        seed_demo_customer_profiles(cur, profiles, readings)
         # Place the devices that sit on the line. Same reasoning as the pipes: an existing
         # volume already has these rows, so this must UPDATE rather than skip.
         cur.executemany(
@@ -174,7 +228,10 @@ def main() -> None:
             ],
         )
         conn.commit()
-    print(f"seeded: {len(devices)} devices, {len(pipes)} pipes, {len(customers)} customers")
+    print(
+        f"seeded: {len(devices)} devices, {len(pipes)} pipes, "
+        f"{len(profiles)} customers, {len(readings)} readings"
+    )
 
 
 if __name__ == "__main__":

@@ -75,11 +75,24 @@ export interface SecResponse {
   readonly detail: string | null;
 }
 
+/** Distinct affected accounts per PWA top-level customer type. The three sum to `count`. */
+export interface TypeBreakdown {
+  readonly type_1: number;
+  readonly type_2: number;
+  readonly type_3: number;
+}
+
 export interface AffectedCustomer {
   readonly customer_id: string;
   readonly node: string;
   readonly area: string;
   readonly branch: string;
+  // Enriched (PR-I) — non-null only when MTP_CUSTOMER_IMPACT_ENABLED; null/absent otherwise.
+  readonly type_code?: number | null;
+  readonly subtype_code?: number | null;
+  readonly account_no?: string | null;
+  readonly meter_no?: string | null;
+  readonly latest_usage_m3?: number | null;
 }
 
 export interface ImpactResponse {
@@ -87,6 +100,50 @@ export interface ImpactResponse {
   readonly affected_pipe_ids: readonly string[];
   readonly customers: readonly AffectedCustomer[];
   readonly count: number;
+  readonly simulated: boolean;
+  // Enriched (PR-I) — null when the Map Ta Phut customer feature is off.
+  readonly zone?: string | null;
+  readonly type_breakdown?: TypeBreakdown | null;
+}
+
+/** One closed monthly meter period. Integer m³ so `usage = reading − previous` is exact. */
+export interface DemoMeterReading {
+  readonly period: string;
+  readonly previous_reading_m3: number;
+  readonly reading_m3: number;
+  readonly usage_m3: number;
+}
+
+/** One SIMULATED Map Ta Phut account + its 12-month history (`GET /api/twin/customers/{id}`). */
+export interface DemoCustomerDetail {
+  readonly customer_id: string;
+  readonly account_no: string;
+  readonly meter_no: string;
+  readonly type_code: number;
+  readonly subtype_code: number;
+  readonly meter_size: string;
+  readonly pressure_zone_id: string;
+  readonly address_label: string;
+  readonly area: string;
+  readonly branch: string;
+  readonly profile_version: string;
+  readonly readings: readonly DemoMeterReading[];
+  readonly simulated: boolean;
+}
+
+export interface ImpactZoneFeature {
+  readonly type: "Feature";
+  readonly properties: Readonly<Record<string, unknown>>;
+  readonly geometry: Readonly<Record<string, unknown>>;
+}
+
+/** The SIMULATED low-pressure footprint (`GET /api/twin/gis/impact-zones`) — never real GIS. */
+export interface ImpactZoneCollection {
+  readonly type: "FeatureCollection";
+  readonly scenario_id: string;
+  readonly zone_id: string;
+  readonly provenance: "SIMULATED_LOW_PRESSURE_FOOTPRINT";
+  readonly features: readonly ImpactZoneFeature[];
   readonly simulated: boolean;
 }
 

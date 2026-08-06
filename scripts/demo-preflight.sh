@@ -99,6 +99,24 @@ else
   printf '  ✗ %-34s (worklist empty — scoring has not run)\n' "topic ๓ · scoring produced output"; FAILED=1
 fi
 
+# PR-I: the Map Ta Phut customer dataset. Flag-INDEPENDENT — the seed always lands exactly 200
+# profiles / 2,400 readings / 140-35-25, whatever MTP_CUSTOMER_IMPACT_ENABLED is. A drift
+# (199/201, wrong type mix, incomplete readings) fails the gate before a judge ever sees it.
+if mtp=$("${DEMO_COMPOSE[@]}" exec -T timescaledb timeout 8 psql -U pwa -d pwa -tA -F' ' \
+  -c "SELECT (SELECT count(*) FROM demo_customer_profile WHERE profile_version='mtp-low-pressure-200-v1'), (SELECT count(*) FROM demo_customer_meter_reading), (SELECT count(*) FROM demo_customer_profile WHERE type_code=1 AND profile_version='mtp-low-pressure-200-v1'), (SELECT count(*) FROM demo_customer_profile WHERE type_code=2 AND profile_version='mtp-low-pressure-200-v1'), (SELECT count(*) FROM demo_customer_profile WHERE type_code=3 AND profile_version='mtp-low-pressure-200-v1')" \
+  2>/dev/null | tr -s ' \n' ' ' | sed 's/ *$//'); then
+  if [ "$mtp" = "200 2400 140 35 25" ]; then
+    printf '  ✓ %-34s 200 profiles · 2400 readings · 140/35/25\n' "topic ๒ · Map Ta Phut customers"
+  else
+    printf '  ✗ %-34s (got: %s; want 200 2400 140 35 25)\n' "topic ๒ · Map Ta Phut customers" "$mtp"
+    FAILED=1
+  fi
+else
+  printf '  ✗ %-34s (customer-count probe failed — container/psql error)\n' \
+    "topic ๒ · Map Ta Phut customers"
+  FAILED=1
+fi
+
 echo "────────────────────────────────────────"
 if [ "$FAILED" = 0 ]; then
   echo "✓ DEMO READY — every scored surface is live."
