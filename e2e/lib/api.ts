@@ -99,6 +99,43 @@ export function demoStatus(): Promise<{ enabled: boolean; active_run_id: string 
   return apiJson("/api/demo/scenario");
 }
 
+// ── PR-J: Map Ta Phut low-pressure impact (read-only probes for the same-DOM journey) ──
+
+export interface ImpactPreview {
+  count: number;
+  zone: string | null;
+  type_breakdown: { type_1: number; type_2: number; type_3: number } | null;
+  customers: Array<{ customer_id: string; account_no?: string | null; type_code?: number | null }>;
+  simulated: boolean;
+}
+
+/** GET /api/twin/impact/{pipe_id} — enriched only when MTP_CUSTOMER_IMPACT_ENABLED=1. */
+export function impactFor(pipeId: string): Promise<ImpactPreview> {
+  return apiJson<ImpactPreview>(`/api/twin/impact/${encodeURIComponent(pipeId)}`);
+}
+
+export interface CustomerDetailProbe {
+  customer_id: string;
+  pressure_zone_id: string;
+  readings: Array<{
+    period: string;
+    previous_reading_m3: number;
+    reading_m3: number;
+    usage_m3: number;
+  }>;
+  [k: string]: unknown;
+}
+
+/** GET /api/twin/customers/{id} — one SIMULATED account + its 12 readings (404 when the flag is off). */
+export function customerDetail(customerId: string): Promise<CustomerDetailProbe> {
+  return apiJson<CustomerDetailProbe>(`/api/twin/customers/${encodeURIComponent(customerId)}`);
+}
+
+/** GET /api/twin/gis/impact-zones — the SIMULATED low-pressure footprint GeoJSON. */
+export function impactZones(): Promise<{ provenance: string; zone_id: string; features: unknown[] }> {
+  return apiJson("/api/twin/gis/impact-zones");
+}
+
 /** Restart the MQTT broker (item 1.2 disconnect). */
 export function restartBroker(): void {
   runCompose(["restart", "mosquitto"]);

@@ -11,9 +11,10 @@ Honest status of the scored 100-point demo. Read with `POC_SPEC.md` §4A (the ru
 
 **Refreshed 2026-08-05 with PR-D/PR-E.** The three demo topics are on screen (topic ๒ = PR-7,
 topic ๑ = PR-8, topic ๓ = PR-9), and all 16 scored items have implementation paths connected to
-their runtime entry points: **16/16 built and wired**. The current warm Playwright suite (34 specs
-including the demo-director transitions; the four real-geometry GIS proofs in
-`topic2-gis.spec.ts` self-skip while `PIPE_GIS_ENABLED` is off — PR-H lands dark) protects the strongest live paths, including the timed
+their runtime entry points: **16/16 built and wired**. The current warm Playwright suite (37 specs
+including the demo-director transitions and the PR-J click-to-200 journey; the six
+`PIPE_GIS_ENABLED`-gated proofs in `topic2-gis.spec.ts` — the four real-geometry proofs plus two
+PR-J GIS-view checks — self-skip while GIS is off — PR-H lands dark) protects the strongest live paths, including the timed
 band `warning` → model `critical` → recovery sequence and the literal operator/DOM oracles for
 topic ๓; their exact-merged-SHA acceptance remains Gate A1's.
 
@@ -40,7 +41,7 @@ complete E2E-readiness claim.
 | 2.1 | SVG zoom, no blur (5) | ✅ | PR-7 | `topic2 2.1` |
 | 2.2 | Device status auto-updates, no refresh (5) | ✅ (director forces the transition on cue) | PR-7, director #30 | `topic2 2.2` |
 | 2.3 | Pump anomaly + SEC tooltip (10) | ✅ (induced anomaly + on-screen recomputable derivation) | PR-7, PR-C | `topic2 2.3` + `scenario anomaly` |
-| 2.4 | Pressure drop → pipe highlight + affected customers (10) | ✅ (drop < 2.0 bar) | PR-7 | `topic2 2.4` |
+| 2.4 | Pressure drop → clickable footprint/pipe → 200-customer drawer + 12-reading detail (10) | ✅ clickable (200 · 140/35/25) | PR-7 + **PR-J** | `scenario-transitions` (PR-J journey) |
 | 2.5 | Source code: config + ≥3 components (5) | ✅ | PR-0 → PR-7 → PR-9 | `topic2 2.5` |
 | 3.1 | Trained model file + algorithm + params (5) | ◑ built/wired; complete visible loaded-artifact SHA oracle delivered (PR-D); exact-SHA acceptance pending Gate A1 | PR-4, `/api/model` PR-9 | `topic3 3.1` + `3.1b` |
 | 3.2 | Health/PTTF vary across ≥2 datasets (5) | ◑ built/wired; displayed dataset-value oracle delivered (PR-D); exact-SHA acceptance pending Gate A1 | PR-4, `/api/model` PR-9 | `topic3 3.2` (DOM↔API literal + visible) |
@@ -49,11 +50,12 @@ complete E2E-readiness claim.
 | 3.5 | Prioritized Worklist (5) | ◑ built/wired; first-three rendered↔API row oracle delivered (PR-E); exact-SHA acceptance pending Gate A1 | PR-5, screen PR-9 | `topic3 3.5` (first-three rendered↔API, visible cells) |
 | 3.6 | Root Cause Analysis (5) | ◑ built/wired; induced rendered-cause variation oracle delivered (PR-E); exact-SHA acceptance pending Gate A1 | PR-4/PR-5, screen PR-9 | `topic3 3.6` + `3.6b` (induced top-cause change) |
 
-**Implementation coverage: 16/16 built and wired.** Current automated evidence is 33 Playwright
-specs, including a global SIMULATED-marker check, the demo-director transitions in
-`scenario-transitions.spec.ts`, and the PR-H GIS view specs in `topic2-gis.spec.ts` (dark-landing
-UX always; the four real-geometry proofs run only on a locally GIS-enabled stack and are NOT part
-of scored evidence until data-owner permission is recorded). The PR-D/PR-E literal oracles are DELIVERED; Gate A1's
+**Implementation coverage: 16/16 built and wired.** Current automated evidence is 37 Playwright
+specs, including a global SIMULATED-marker check, the demo-director transitions plus the PR-J
+clickable low-pressure journey in `scenario-transitions.spec.ts`, and the PR-H GIS view specs in
+`topic2-gis.spec.ts` (dark-landing UX always; the six `PIPE_GIS_ENABLED`-gated proofs — the four
+real-geometry proofs plus two PR-J GIS-view checks — run only on a locally GIS-enabled stack
+and are NOT part of scored evidence until data-owner permission is recorded). The PR-D/PR-E literal oracles are DELIVERED; Gate A1's
 exact-merged-SHA acceptance run remains the boundary between delivered evidence and accepted
 evidence. Design coverage: 15/16 have a mockup (2.5 needs none — it is the repo).
 

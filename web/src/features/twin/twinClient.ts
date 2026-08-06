@@ -10,11 +10,13 @@ import { getJson } from "@/api/client";
 
 import type {
   BandsResponse,
+  DemoCustomerDetail,
   DeviceLiveState,
   GisManifest,
   GisNetwork,
   GisScope,
   ImpactResponse,
+  ImpactZoneCollection,
   SecResponse,
   TwinEventFrame,
   TwinPipe,
@@ -38,6 +40,34 @@ export function fetchSec(assetId: string, signal?: AbortSignal): Promise<SecResp
 
 export function fetchImpact(pipeId: string, signal?: AbortSignal): Promise<ImpactResponse> {
   return getJson<ImpactResponse>(`/api/twin/impact/${encodeURIComponent(pipeId)}`, { signal });
+}
+
+/**
+ * One SIMULATED Map Ta Phut account + its 12-month reading history (PR-I route, PR-J consumer).
+ * 404 when `MTP_CUSTOMER_IMPACT_ENABLED` is off or the id is unknown/non-demo — the caller shows
+ * an explicit unavailable state, never a fabricated customer.
+ */
+export function fetchCustomerDetail(
+  customerId: string,
+  signal?: AbortSignal,
+): Promise<DemoCustomerDetail> {
+  return getJson<DemoCustomerDetail>(
+    `/api/twin/customers/${encodeURIComponent(customerId)}`,
+    { signal },
+  );
+}
+
+/**
+ * The SIMULATED low-pressure footprint as GeoJSON (PR-I route, PR-J consumer). 404 when the
+ * customer feature is off or the scenario is unknown; the footprint affordance falls back to the
+ * impact's own `zone` string, so a 404 here never suppresses the clickable area.
+ */
+export function fetchImpactZones(
+  scenarioId?: string,
+  signal?: AbortSignal,
+): Promise<ImpactZoneCollection> {
+  const query = scenarioId != null ? `?scenario_id=${encodeURIComponent(scenarioId)}` : "";
+  return getJson<ImpactZoneCollection>(`/api/twin/gis/impact-zones${query}`, { signal });
 }
 
 /** The GIS bundle manifest (PR-H). 404 = feature disabled (dark), 503 = broken bundle. */

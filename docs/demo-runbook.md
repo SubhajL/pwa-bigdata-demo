@@ -94,7 +94,7 @@ ordered rows.
 | 2.1 (5) | click the **ขยายเข้า / ออก** zoom buttons | the SVG schematic | it scales crisply (vector, `viewBox` changes; never blurs) | reset-view button |
 | 2.2 (5) | (live) | device symbols update from the socket | statuses match the live model, no page refresh needed | — |
 | 2.3 (10) | press **จำลองอุปกรณ์เสื่อมสภาพ** (§0b), then click pump **P-2** | its symbol shape + the SEC card | shape-coded status (not colour alone); **SEC in kWh/m³ with its derivation** (กำลังไฟฟ้า ÷ อัตราการไหล, timestamps, pair skew) + SIMULATED marker — the injection lays a fresh pair so the value is computable on cue, and the card refreshes as the status changes; with no recent scenario the live pair can honestly read "—" | **คืนสู่สภาวะปกติ** |
-| 2.4 (10) | click **P-2** while a drop is active | the **ผู้ใช้น้ำที่ได้รับผลกระทบ** card | affected pipes highlighted + a non-empty seeded customer list (SIMULATED-badged) | `make demo-scenario MODE=normal` |
+| 2.4 (10) | trigger a drop (§0b), then click the **พื้นที่แรงดันต่ำจำลอง** footprint (or a highlighted pipe) | the affected-customer **drawer** | exactly **200 ราย** (SIMULATED IMPACT, 140 / 35 / 25 mix), 25-row pages (8 pages), a type filter that never changes the 200 headline, and a row's synthetic account / meter / type / scenario address + **12** monthly readings | trigger **normal** — the footprint clears and the drawer closes |
 | 2.5 (5) | open the repo in the IDE | `web/src/features/twin/twin.config.ts` + `DeviceSymbol.tsx`, `PipeEdge.tsx`, `ProcessSchematic.tsx` | one config file + ≥ 3 components | — |
 
 > **✔ Demo-data tuning (2.2 / 2.4), PR-7 — landed 2026-08-01.** Pump **P-2 now backfills to
@@ -117,10 +117,19 @@ ordered rows.
 > readings) in place of the five Samut Sakhon rows — 120 on the first service node and 80 on the
 > last, so the upstream corridor impacts all 200 and the last leg 80. PR-I lands the BACKEND dark:
 > the enriched impact response, the customer-detail route (`GET /api/twin/customers/{id}`), and the
-> impact-zone route are all gated behind `MTP_CUSTOMER_IMPACT_ENABLED` (default **off**); with the
-> flag off the impact card still shows the 200 as a basic list. The clickable low-pressure footprint
-> and the per-account drawer UI arrive with PR-J. Provenance and privacy:
-> `docs/data/map-ta-phut-customer-profile.md`.
+> impact-zone route are all gated behind `MTP_CUSTOMER_IMPACT_ENABLED`; the application default is
+> **off** (a non-demo deploy stays dark and the impact card shows the 200 as a basic list).
+>
+> **✔ Clickable low-pressure experience (2.4), PR-J — landed.** The **demo compose enables**
+> `MTP_CUSTOMER_IMPACT_ENABLED=1` by default (the customer-profile readiness contract is met), so
+> the scored surface is the click-through journey: a drop paints a non-colour-only
+> `พื้นที่แรงดันต่ำจำลอง` footprint + a highlighted pipe; clicking either opens ONE drawer of exactly
+> **200** (SIMULATED IMPACT, 140 / 35 / 25) with 25-row/8-page pagination, a type filter that keeps
+> the 200 headline, and a row's synthetic account detail + **12** monthly readings; `normal` clears
+> the footprint and closes the drawer. `PIPE_GIS_ENABLED` (the real Rayong basemap) stays off unless
+> the local bundle is built — the footprint itself does not need it. The journey is browser-proven
+> on one `/operations` DOM by `e2e/tests/scenario-transitions.spec.ts` (and, on a GIS-enabled stack,
+> `topic2-gis.spec.ts`). Provenance and privacy: `docs/data/map-ta-phut-customer-profile.md`.
 
 ### Optional GIS view — แผนที่ GIS มาบตาพุด (PR-H, ships DARK)
 

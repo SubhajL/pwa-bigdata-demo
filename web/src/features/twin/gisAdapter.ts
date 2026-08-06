@@ -14,6 +14,7 @@ import type {
   GisLineFeature,
   GisManifest,
   GisNetwork,
+  ImpactZoneCollection,
   SecResponse,
 } from "./types";
 
@@ -45,6 +46,16 @@ export function highlightedPipeIds(
 /** MapLibre filter matching features whose `pipe_id` is in `pipeIds`. */
 export function highlightFilter(pipeIds: readonly number[]): unknown[] {
   return ["in", ["get", "pipe_id"], ["literal", [...pipeIds]]];
+}
+
+/** The impact-zone footprint as a GeoJSON FeatureCollection for `source.setData`, or an EMPTY
+ *  collection when no zone is active (PR-J). The source/layers are created empty at map load and
+ *  fed by this on prop change, so a late-arriving zone always has a source to update. */
+export function impactZoneGeoJson(zone: ImpactZoneCollection | null): {
+  readonly type: "FeatureCollection";
+  readonly features: readonly ImpactZoneCollection["features"][number][];
+} {
+  return { type: "FeatureCollection", features: zone?.features ?? [] };
 }
 
 /**

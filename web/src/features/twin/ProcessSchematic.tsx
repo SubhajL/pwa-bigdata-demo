@@ -17,6 +17,8 @@ export interface ProcessSchematicProps {
   readonly affectedPipeIds: ReadonlySet<string>;
   readonly selected: string | null;
   readonly onSelect: (assetId: string) => void;
+  /** Open the affected-customer drawer — wired onto affected pipes as a click entry point (PR-J). */
+  readonly onOpenImpact?: () => void;
 }
 
 const BASE: ViewBox = TWIN_CONFIG.viewBox;
@@ -33,6 +35,7 @@ export function ProcessSchematic({
   affectedPipeIds,
   selected,
   onSelect,
+  onOpenImpact,
 }: ProcessSchematicProps): JSX.Element {
   const [viewBox, setViewBox] = useState<ViewBox>(BASE);
 
@@ -63,9 +66,17 @@ export function ProcessSchematic({
         height={420}
         className="rounded-card border border-outline-variant bg-surface-container"
       >
-        {topology.pipes.map((pipe) => (
-          <PipeEdge key={`${pipe.pipe_id}:${pipe.from_node}:${pipe.to_node}`} pipe={pipe} affected={affectedPipeIds.has(pipe.pipe_id)} />
-        ))}
+        {topology.pipes.map((pipe) => {
+          const affected = affectedPipeIds.has(pipe.pipe_id);
+          return (
+            <PipeEdge
+              key={`${pipe.pipe_id}:${pipe.from_node}:${pipe.to_node}`}
+              pipe={pipe}
+              affected={affected}
+              onOpenImpact={affected ? onOpenImpact : undefined}
+            />
+          );
+        })}
         {topology.devices.map((device) => (
           <DeviceSymbol
             key={device.asset_id}

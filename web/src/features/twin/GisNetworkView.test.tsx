@@ -13,7 +13,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { GisManifest, GisNetwork } from "./types";
+import type { GisManifest, GisNetwork, ImpactZoneCollection } from "./types";
 
 type Handler = (event: unknown) => void;
 
@@ -26,10 +26,20 @@ vi.mock("maplibre-gl", () => {
     layerClicks: Array<{ layer: string; handler: Handler }> = [];
     layers: Array<Record<string, unknown>> = [];
     sources: Record<string, { data?: { features?: unknown[] } }> = {};
+    setSourceData: Array<{ id: string; data: { features?: unknown[] } }> = [];
     renderedFeatures: unknown[] = [];
     removeThrows = false;
     addSource = vi.fn((id: string, spec: { data?: { features?: unknown[] } }) => {
       this.sources[id] = spec;
+    });
+    getSource = vi.fn((id: string) => {
+      if (!this.sources[id]) return undefined;
+      return {
+        setData: (data: { features?: unknown[] }) => {
+          this.sources[id].data = data;
+          this.setSourceData.push({ id, data });
+        },
+      };
     });
     querySourceFeatures = vi.fn((id: string) => this.sources[id]?.data?.features ?? []);
     queryRenderedFeatures = vi.fn(() => this.renderedFeatures);
@@ -100,13 +110,18 @@ vi.mock("maplibre-gl", () => {
 });
 
 import { GisNetworkView } from "./GisNetworkView";
+import { GIS_CONFIG } from "./gis.config";
+import { resolveCssColor } from "./gisAdapter";
 
 interface MockMapInstance {
   options: Record<string, unknown>;
   layers: Array<Record<string, unknown>>;
+  sources: Record<string, { data?: { features?: unknown[] } }>;
+  setSourceData: Array<{ id: string; data: { features?: unknown[] } }>;
   renderedFeatures: unknown[];
   removeThrows: boolean;
   addSource: ReturnType<typeof vi.fn>;
+  getSource: ReturnType<typeof vi.fn>;
   addLayer: ReturnType<typeof vi.fn>;
   queryRenderedFeatures: ReturnType<typeof vi.fn>;
   setFilter: ReturnType<typeof vi.fn>;
@@ -252,14 +267,17 @@ describe("GisNetworkView", () => {
     renderView();
     const map = await mountedMap();
     act(() => map.fire("load"));
-    expect(map.layers).toHaveLength(2);
-    const [base, highlight] = map.layers as Array<{
-      id: string;
-      type: string;
-      source: string;
-      filter?: unknown;
-      paint: Record<string, unknown>;
-    }>;
+    const pipeLayers = (
+      map.layers as Array<{
+        id: string;
+        type: string;
+        source: string;
+        filter?: unknown;
+        paint: Record<string, unknown>;
+      }>
+    ).filter((l) => l.id === "pipe-ry-line" || l.id === "pipe-ry-highlight");
+    expect(pipeLayers).toHaveLength(2);
+    const [base, highlight] = pipeLayers;
     for (const layer of [base, highlight]) {
       expect(layer.type).toBe("line");
       expect(layer.source).toBe("pipe-ry");
@@ -289,7 +307,7 @@ describe("GisNetworkView", () => {
     act(() => map.fire("sourcedata", { sourceId: "pipe-ry", isSourceLoaded: true }));
     expect(view).toHaveAttribute("data-map-ready", "false");
     expect(view).toHaveAttribute("data-rendered-features", "0");
-    expect(map.layers).toHaveLength(2);
+    expect(map.layers.some((l) => l.id === "pipe-ry-line")).toBe(true);
   });
 
   it("reports ready only after all distinct base-layer pipes are query-rendered", async () => {
@@ -391,6 +409,160 @@ describe("GisNetworkView", () => {
     expect(click).toBeDefined();
     click?.handler({ features: [{ properties: { pipe_id: 4926 } }] });
     expect(onSelectPipe).toHaveBeenCalledWith(4926);
+  });
+
+  // ── PR-J: the SIMULATED low-pressure footprint layer (R13/R22) ──────────────────────
+  const ZONE: ImpactZoneCollection = {
+    type: "FeatureCollection",
+    scenario_id: "mtp-low-pressure-200-v1",
+    zone_id: "MTP-LPZ-01",
+    provenance: "SIMULATED_LOW_PRESSURE_FOOTPRINT",
+    simulated: true,
+    features: [
+      {
+        type: "Feature",
+        properties: { zone_id: "MTP-LPZ-01", label: "พื้นที่แรงดันต่ำจำลอง", simulated: true },
+        geometry: {
+          type: "Polygon",
+          coordinates: [[[101.135, 12.665], [101.175, 12.665], [101.175, 12.7], [101.135, 12.7], [101.135, 12.665]]],
+        },
+      },
+    ],
+  };
+
+  it("T6b: creates the footprint source EMPTY at load, so a LATER zone still has a source", async () => {
+    const view = renderView({ impactZone: null });
+    const map = await mountedMap();
+    act(() => map.fire("load"));
+    // Source exists at load with no features — the zone arrived AFTER mount (judge triggers the
+    // drop while already on the GIS view).
+    expect(map.addSource).toHaveBeenCalledWith("mtp-lpz", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+    view.rerender(
+      <GisNetworkView
+        manifest={MANIFEST}
+        network={NETWORK}
+        markerStatus="critical"
+        highlightedPipeIds={[]}
+        onSelectPipe={() => undefined}
+        impactZone={ZONE}
+        onOpenImpact={() => undefined}
+      />,
+    );
+    await waitFor(() =>
+      expect(map.setSourceData.some((s) => s.id === "mtp-lpz" && (s.data.features?.length ?? 0) === 1)).toBe(true),
+    );
+  });
+
+  it("T6-recovery: a null zone clears the footprint (empty features) in place", async () => {
+    const view = renderView({ impactZone: ZONE });
+    const map = await mountedMap();
+    act(() => map.fire("load"));
+    view.rerender(
+      <GisNetworkView
+        manifest={MANIFEST}
+        network={NETWORK}
+        markerStatus="normal"
+        highlightedPipeIds={[]}
+        onSelectPipe={() => undefined}
+        impactZone={null}
+        onOpenImpact={() => undefined}
+      />,
+    );
+    await waitFor(() => {
+      const last = map.setSourceData.filter((s) => s.id === "mtp-lpz").at(-1);
+      expect(last?.data.features).toEqual([]);
+    });
+  });
+
+  it("T6a: clicking the footprint fill layer opens the drawer (onOpenImpact)", async () => {
+    const onOpenImpact = vi.fn();
+    renderView({ impactZone: ZONE, onOpenImpact });
+    const map = await mountedMap();
+    act(() => map.fire("load"));
+    const click = map.layerClicks.find((c) => c.layer === "mtp-lpz-fill");
+    expect(click).toBeDefined();
+    click?.handler({});
+    expect(onOpenImpact).toHaveBeenCalledTimes(1);
+  });
+
+  it("R19: a click on a HIGHLIGHTED pipe opens the drawer; a non-highlighted pipe shows details", async () => {
+    const onOpenImpact = vi.fn();
+    const onSelectPipe = vi.fn();
+    renderView({ highlightedPipeIds: [4926], onOpenImpact, onSelectPipe });
+    const map = await mountedMap();
+    act(() => map.fire("load"));
+    const lineClick = map.layerClicks.find((c) => c.layer === "pipe-ry-line");
+    expect(lineClick).toBeDefined();
+    // A highlighted pipe → the drawer, NOT the details.
+    lineClick?.handler({ features: [{ properties: { pipe_id: 4926 } }] });
+    expect(onOpenImpact).toHaveBeenCalledTimes(1);
+    expect(onSelectPipe).not.toHaveBeenCalled();
+    // A different, non-highlighted pipe → details, NOT the drawer.
+    lineClick?.handler({ features: [{ properties: { pipe_id: 111 } }] });
+    expect(onSelectPipe).toHaveBeenCalledWith(111);
+    expect(onOpenImpact).toHaveBeenCalledTimes(1); // unchanged
+  });
+
+  it("R19b: the device MARKER always shows pipe details, even while its bound pipe is highlighted", async () => {
+    const onOpenImpact = vi.fn();
+    const onSelectPipe = vi.fn();
+    renderView({ highlightedPipeIds: [4926], onOpenImpact, onSelectPipe }); // 4926 is the bound pipe
+    await mountedMap();
+    // The marker (its bound pipe IS highlighted during a drop) must NOT open the drawer — its
+    // PR-H "show REAL attributes" behaviour stays intact during an incident (QCHECK round 3 HIGH).
+    fireEvent.click(screen.getByTestId("gis-device-marker"));
+    expect(onSelectPipe).toHaveBeenCalledWith(4926);
+    expect(onOpenImpact).not.toHaveBeenCalled();
+  });
+
+  it("R19c: the marker click STOPS propagating, so it cannot reach maplibre's canvas listener", async () => {
+    // QCHECK round 4 HIGH: maplibre places the marker inside the canvas container, whose native
+    // click listener would otherwise receive the bubbled marker click and hit-test it against the
+    // zone/line layers → open the drawer. The native markerEl listener stopPropagation guards it.
+    const onSelectPipe = vi.fn();
+    renderView({ highlightedPipeIds: [4926], onSelectPipe });
+    await mountedMap();
+    const marker = screen.getByTestId("gis-device-marker");
+    const container = marker.closest('[role="application"]');
+    expect(container).not.toBeNull();
+    const ancestorHeard = vi.fn();
+    container!.addEventListener("click", ancestorHeard);
+    fireEvent.click(marker);
+    expect(onSelectPipe).toHaveBeenCalledWith(4926); // details still ran
+    expect(ancestorHeard).not.toHaveBeenCalled(); // …but the click did NOT bubble past markerEl
+    container!.removeEventListener("click", ancestorHeard);
+  });
+
+  it("T6d: the footprint is a valid dashed-outline + translucent fill, token-coloured (no hex)", async () => {
+    renderView({ impactZone: ZONE, onOpenImpact: () => undefined });
+    const map = await mountedMap();
+    act(() => map.fire("load"));
+    const fill = map.layers.find((l) => l.id === "mtp-lpz-fill") as { type: string; source: string; paint: Record<string, unknown> };
+    const outline = map.layers.find((l) => l.id === "mtp-lpz-outline") as { type: string; source: string; paint: Record<string, unknown> };
+    expect(fill.type).toBe("fill");
+    expect(outline.type).toBe("line");
+    expect(fill.source).toBe("mtp-lpz");
+    expect(outline.source).toBe("mtp-lpz");
+    // Valid maplibre paint keys only (catches `fill-colour`/typos).
+    expect(Object.keys(fill.paint).every((k) => ["fill-color", "fill-opacity"].includes(k))).toBe(true);
+    expect(Object.keys(outline.paint).every((k) => ["line-color", "line-width", "line-dasharray"].includes(k))).toBe(true);
+    // Non-colour encoding present: a dashed outline + a translucent fill.
+    expect(outline.paint["line-dasharray"]).toEqual([2, 2]);
+    expect(fill.paint["fill-opacity"]).toBeGreaterThan(0);
+    expect(fill.paint["fill-opacity"]).toBeLessThan(1);
+    // Colour is TOKEN-resolved, never a hex literal: the paint value must equal
+    // resolveCssColor(zone token). A hardcoded hex would differ from the token's resolved value.
+    const expected = resolveCssColor(GIS_CONFIG.colorTokens.zone);
+    if (expected != null) {
+      expect(fill.paint["fill-color"]).toBe(expected);
+      expect(outline.paint["line-color"]).toBe(expected);
+    } else {
+      expect("fill-color" in fill.paint).toBe(false);
+      expect("line-color" in outline.paint).toBe(false);
+    }
   });
 
   it("surfaces a pre-load map error as an explicit failed state, never a blank box", async () => {

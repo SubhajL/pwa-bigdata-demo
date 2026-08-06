@@ -127,11 +127,15 @@ services:
       PIPE_GIS_DIR: /srv/data/curated/pipe_ry
       PIPE_GIS_APPROVED_SOURCE_FINGERPRINT: "${PIPE_GIS_APPROVED_SOURCE_FINGERPRINT:-}"
       PIPE_GIS_APPROVED_BUNDLE_SHA256: "${PIPE_GIS_APPROVED_BUNDLE_SHA256:-}"
-      # PR-I: the Map Ta Phut 200-customer impact surface. Default OFF — the schema and
-      # 200-account seed always land, but the enriched impact detail, the per-customer
-      # route, and the impact-zone route stay dark (404) until enabled. Turn on LOCALLY
-      # with MTP_CUSTOMER_IMPACT_ENABLED=1; the profile version is fixed to the seed.
-      MTP_CUSTOMER_IMPACT_ENABLED: "${MTP_CUSTOMER_IMPACT_ENABLED:-0}"
+      # PR-I/PR-J: the Map Ta Phut 200-customer impact surface. This is the configured demo
+      # environment, and its customer-profile readiness contract is met (the seed always lands
+      # exactly 200 profiles / 2,400 readings / 140-35-25), so the demo ENABLES it by default —
+      # PR-J's clickable footprint → drawer → 200 → detail journey is the scored surface here.
+      # The application Settings default is still False (production/non-demo stays dark: enriched
+      # impact, the per-customer route, and the impact-zone route 404 until enabled). Override to 0
+      # for a deliberately dark stack. Note: PIPE_GIS_ENABLED (the real Rayong map) stays 0 — it
+      # needs the permission-gated local bundle; the impact-zone footprint does NOT.
+      MTP_CUSTOMER_IMPACT_ENABLED: "${MTP_CUSTOMER_IMPACT_ENABLED:-1}"
       MTP_CUSTOMER_PROFILE: "${MTP_CUSTOMER_PROFILE:-mtp-low-pressure-200-v1}"
       # Browser origins allowed to call the API cross-origin. In the normal setup the
       # Vite proxy makes the browser same-origin and this never fires; it covers a judge

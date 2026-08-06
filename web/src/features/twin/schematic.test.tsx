@@ -8,7 +8,7 @@
  * Authored by Claude; the implementer must not modify this file (DREP §10).
  */
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { StatusKind } from "@/components/StatusChip";
 
@@ -104,6 +104,50 @@ describe("R2 — geometry is data-driven, not hardcoded", () => {
     const line = document.querySelector('[data-pipe="Q"]');
     expect(line?.getAttribute("x1")).toBe("10");
     expect(line?.getAttribute("y2")).toBe("40");
+  });
+});
+
+describe("R19 — the affected pipe corridor is a click entry point to the impact drawer", () => {
+  const affectedTopo = topo({
+    pipes: [
+      { pipe_id: "P", from_node: "a", to_node: "b", dma: "DMA-03", x1: 60, y1: 200, x2: 440, y2: 200 },
+    ],
+  });
+
+  it("T10: clicking an affected pipe fires onOpenImpact (click AND Enter)", () => {
+    const onOpenImpact = vi.fn();
+    render(
+      <ProcessSchematic
+        topology={affectedTopo}
+        statusOf={() => "critical"}
+        affectedPipeIds={new Set(["P"])}
+        selected={null}
+        onSelect={() => {}}
+        onOpenImpact={onOpenImpact}
+      />,
+    );
+    const pipe = screen.getByTestId("affected-pipe");
+    expect(pipe.getAttribute("role")).toBe("button");
+    fireEvent.click(pipe);
+    fireEvent.keyDown(pipe, { key: "Enter" });
+    expect(onOpenImpact).toHaveBeenCalledTimes(2);
+    // the visible highlighted line is still present + marked for the existing E2E/[data-affected]
+    expect(document.querySelector('[data-pipe="P"][data-affected="true"]')).not.toBeNull();
+  });
+
+  it("T10b: a NON-affected pipe is not a button", () => {
+    render(
+      <ProcessSchematic
+        topology={affectedTopo}
+        statusOf={() => "normal"}
+        affectedPipeIds={new Set()}
+        selected={null}
+        onSelect={() => {}}
+        onOpenImpact={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("affected-pipe")).toBeNull();
+    expect(document.querySelector('[data-pipe="P"][data-affected="false"]')).not.toBeNull();
   });
 });
 

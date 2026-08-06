@@ -117,6 +117,62 @@ else
   FAILED=1
 fi
 
+# PR-J: the CLICKABLE surface requires the enriched routes to actually answer. The demo compose
+# defaults MTP_CUSTOMER_IMPACT_ENABLED=1, but a stale .env=0 would silently disable the whole
+# footprint→drawer→200→detail journey — a green screenshot hiding a dead click. Fail CLOSED here,
+# at preflight, rather than at the judge's click. First prove the compose RENDERS the flag on.
+if "${DEMO_COMPOSE[@]}" config 2>/dev/null | grep -qE 'MTP_CUSTOMER_IMPACT_ENABLED:[[:space:]]*"?1"?'; then
+  printf '  ✓ %-34s compose renders =1\n' "topic ๒ · customer flag"
+else
+  printf '  ✗ %-34s compose does not render MTP_CUSTOMER_IMPACT_ENABLED=1 (stale .env?)\n' \
+    "topic ๒ · customer flag"; FAILED=1
+fi
+
+# label url grep-pattern human-expect — a body that does not contain the pattern fails the gate.
+assert_json() {
+  local body
+  if body=$("${CURL[@]}" "$2" 2>/dev/null) && printf '%s' "$body" | grep -q "$3"; then
+    printf '  ✓ %-34s %s\n' "$1" "$4"
+  else
+    printf '  ✗ %-34s (want %s at %s)\n' "$1" "$4" "$2"; FAILED=1
+  fi
+}
+
+echo "→ topic ๒ · Map Ta Phut impact routes (PR-J clickable surface; require the flag on):"
+assert_json "impact corridor = 200"  "$API/api/twin/impact/PIPE-P2-TANK" '"count":200,'          "200 affected (P-2 corridor)"
+assert_json "impact type_1 = 140"    "$API/api/twin/impact/PIPE-P2-TANK" '"type_1":140'           "breakdown type_1=140"
+assert_json "impact type_2 = 35"     "$API/api/twin/impact/PIPE-P2-TANK" '"type_2":35'            "breakdown type_2=35"
+assert_json "impact type_3 = 25"     "$API/api/twin/impact/PIPE-P2-TANK" '"type_3":25'            "breakdown type_3=25"
+assert_json "impact zone id"         "$API/api/twin/impact/PIPE-P2-TANK" '"zone":"MTP-LPZ-01"'    "zone MTP-LPZ-01"
+assert_json "impact last leg = 80"   "$API/api/twin/impact/PIPE-N1-N2"   '"count":80,'            "80 (last-leg discriminator)"
+assert_json "customer detail zone"   "$API/api/twin/customers/SIM-MTP-00001" '"pressure_zone_id":"MTP-LPZ-01"' "detail served"
+if body=$("${CURL[@]}" "$API/api/twin/customers/SIM-MTP-00001" 2>/dev/null) &&
+   [ "$(printf '%s' "$body" | grep -o '"period"' | wc -l | tr -d ' ')" = "12" ]; then
+  printf '  ✓ %-34s %s\n' "customer 12 readings" "12 monthly readings"
+else
+  printf '  ✗ %-34s (want 12 readings at %s)\n' "customer 12 readings" "$API/api/twin/customers/SIM-MTP-00001"; FAILED=1
+fi
+# The footprint must be a STRUCTURALLY valid, non-empty FeatureCollection whose first feature is a
+# Polygon carrying the simulated provenance — parsed, not grepped, so an empty `features:[]` with an
+# unrelated top-level "Polygon" substring cannot pass (QCHECK round 2). python3 is a hard project
+# dependency (the API is FastAPI); if it is somehow absent we fail closed rather than skip.
+if body=$("${CURL[@]}" "$API/api/twin/gis/impact-zones" 2>/dev/null) && command -v python3 >/dev/null 2>&1 &&
+   printf '%s' "$body" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d.get("type") == "FeatureCollection"
+assert d.get("provenance") == "SIMULATED_LOW_PRESSURE_FOOTPRINT"
+assert d.get("zone_id") == "MTP-LPZ-01"
+feats = d.get("features") or []
+assert feats and feats[0].get("geometry", {}).get("type") == "Polygon"
+assert feats[0].get("geometry", {}).get("coordinates")
+' >/dev/null 2>&1; then
+  printf '  ✓ %-34s %s\n' "impact-zone footprint" "simulated FeatureCollection (Polygon)"
+else
+  printf '  ✗ %-34s (want a valid SIMULATED FeatureCollection at %s)\n' \
+    "impact-zone footprint" "$API/api/twin/gis/impact-zones"; FAILED=1
+fi
+
 echo "────────────────────────────────────────"
 if [ "$FAILED" = 0 ]; then
   echo "✓ DEMO READY — every scored surface is live."

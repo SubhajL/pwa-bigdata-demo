@@ -59,10 +59,17 @@ point.
 
 ## Feature gating
 
-`MTP_CUSTOMER_IMPACT_ENABLED` (default off) gates the enriched impact detail, the per-customer
-route, and the impact-zone route. Off, those routes answer 404 and the impact list keeps its basic
-shape — it never falls back to the retired five rows. The schema and the 200-account seed always
-land regardless, because they are simply more clearly-labelled simulated data.
+`MTP_CUSTOMER_IMPACT_ENABLED` gates the enriched impact detail, the per-customer route, and the
+impact-zone route. The application default is off — a non-demo deploy answers 404 and the impact
+list keeps its basic shape, never falling back to the retired five rows. The **demo compose enables
+it** (`docker-compose` defaults it to 1) because the click-through surface is scored; the schema and
+the 200-account seed always land regardless, being simply more clearly-labelled simulated data.
+
+**PR-J (UI consumer).** The frontend now renders the coarse footprint as a clickable, non-colour-only
+`พื้นที่แรงดันต่ำจำลอง` affordance and, on a GIS-enabled stack, as a dashed map layer; clicking it (or
+a highlighted pipe) opens the 200-account drawer with per-account detail and 12 readings. This changes
+nothing about provenance or privacy: the footprint stays a coarse zone polygon (never a customer
+point), every id/address stays synthetic, and the impact stays `SIMULATED` beside any REAL geometry.
 
 ## Sources (classification labels only — assigned to synthetic accounts)
 

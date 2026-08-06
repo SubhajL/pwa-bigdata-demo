@@ -6,9 +6,10 @@
  * synthetic map), a 503 shows an explicit unavailable state, and only a verified bundle
  * renders real geometry. The live browser pass is e2e/tests/topic2-gis.spec.ts.
  */
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import mtpFixture from "@/features/twin/__fixtures__/mtp-contract.json";
 import type {
   BandsResponse,
   GisManifest,
@@ -26,7 +27,9 @@ vi.mock("maplibre-gl", () => {
     static instances: MockMap[] = [];
     options: Record<string, unknown>;
     loadHandlers: Handler[] = [];
+    layerClicks: Array<{ layer: string; handler: Handler }> = [];
     addSource = vi.fn();
+    getSource = vi.fn(() => ({ setData: vi.fn() }));
     addLayer = vi.fn();
     setFilter = vi.fn();
     setPaintProperty = vi.fn();
@@ -34,14 +37,19 @@ vi.mock("maplibre-gl", () => {
     remove = vi.fn();
     getCanvas = vi.fn(() => ({ style: {} }));
     getLayer = vi.fn(() => undefined);
+    querySourceFeatures = vi.fn(() => []);
+    queryRenderedFeatures = vi.fn(() => []);
     constructor(options: Record<string, unknown>) {
       this.options = options;
       MockMap.instances.push(this);
     }
-    on(event: string, _layer: string | Handler, handler?: Handler): this {
-      if (event === "load" && typeof _layer === "function") this.loadHandlers.push(_layer);
-      void handler;
+    on(event: string, layerOrHandler: string | Handler, handler?: Handler): this {
+      if (event === "load" && typeof layerOrHandler === "function") this.loadHandlers.push(layerOrHandler);
+      else if (typeof layerOrHandler === "string" && handler) this.layerClicks.push({ layer: layerOrHandler, handler });
       return this;
+    }
+    fireLayerClick(layer: string, event: unknown): void {
+      this.layerClicks.filter((c) => c.layer === layer).forEach((c) => c.handler(event));
     }
     once(_event: string, _handler: Handler): this {
       return this;
@@ -212,6 +220,8 @@ function stubFetch(
     failOnlyFirst?: boolean;
     /** GIS responses wait on this promise — for late-arrival supersession tests. */
     gate?: Promise<void>;
+    /** Return the enriched 200-account impact (+ impact-zone) — for the PR-J drawer bridge. */
+    enrichedImpact?: boolean;
   } = {},
 ): void {
   let gisAttempts = 0;
@@ -245,7 +255,17 @@ function stubFetch(
       const assetId = decodeURIComponent(url.split("/api/twin/sec/")[1].split(/[?#]/)[0]);
       return json({ ...SEC, asset_id: assetId, sec_kwh_per_m3: assetId === "P-2" ? 0.253 : 0.999 });
     }
+    if (url.includes("/api/twin/gis/impact-zones")) {
+      return json(mtpFixture.zone);
+    }
     if (url.includes("/api/twin/impact/")) {
+      if (gis.enrichedImpact === true) {
+        return json({
+          ...mtpFixture.impact,
+          pipe_id: "PIPE-P2-TANK",
+          affected_pipe_ids: ["PIPE-P2-TANK"],
+        });
+      }
       return json({
         pipe_id: "PIPE-P2-TANK",
         affected_pipe_ids: ["PIPE-P2-TANK"],
@@ -440,5 +460,41 @@ describe("OperationsTwinScreen GIS view", () => {
         "",
       ),
     );
+  });
+
+  it("PR-J R19 — clicking the HIGHLIGHTED bound pipe in the GIS view opens the 200-account drawer", async () => {
+    stubFetch({ enrichedImpact: true });
+    await openGisView();
+    await waitFor(() => expect(screen.getByTestId("gis-network-view")).toBeInTheDocument());
+    const socket = sockets[0];
+    act(() => socket.open());
+    // Drop P-2 → its bound pipe 4926 highlights on the map (the R19 entry point).
+    act(() =>
+      socket.send({
+        event_version: 1,
+        kind: "status",
+        asset_id: "P-2",
+        signal: "pressure_bar",
+        status: "critical",
+        value: 1.0,
+        observed_at: "2026-08-05T10:00:00Z",
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("gis-network-view")).toHaveAttribute("data-highlighted-pipes", "4926"),
+    );
+    // Fire a click on the HIGHLIGHTED pipe LINE (the source-step-4 entry point) — the screen wires
+    // GisNetworkView.onOpenImpact to openImpactDrawer, so the shared 200-account drawer opens.
+    const lib = (await import("maplibre-gl")) as unknown as {
+      Map: { instances: Array<{ loadHandlers: Array<() => void>; fireLayerClick: (l: string, e: unknown) => void }> };
+    };
+    const map = lib.Map.instances[lib.Map.instances.length - 1];
+    act(() => map.loadHandlers.forEach((h) => h())); // register the layer-click handlers
+    act(() => map.fireLayerClick("pipe-ry-line", { features: [{ properties: { pipe_id: 4926 } }] }));
+    const drawer = await screen.findByTestId("impact-drawer");
+    expect(within(drawer).getByTestId("impact-count").textContent).toContain("200");
+    // The device MARKER, by contrast, still shows REAL pipe details even now (bound pipe
+    // highlighted) — it never opens the drawer. That discrimination is unit-tested in
+    // GisNetworkView.test.tsx (R19/R19b); the marker→REAL-attributes path is topic2-gis 2.5.
   });
 });
