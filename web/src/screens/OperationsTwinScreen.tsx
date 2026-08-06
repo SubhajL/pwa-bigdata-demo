@@ -6,6 +6,7 @@ import { SimulatedBadge } from "@/components/SimulatedBadge";
 import { StatusChip, type StatusKind } from "@/components/StatusChip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AffectedCustomerDrawer } from "@/features/twin/AffectedCustomerDrawer";
 import { DemoScenarioPanel } from "@/features/twin/DemoScenarioPanel";
 import { EnergyContextCard } from "@/features/twin/EnergyContextCard";
 import { availabilityFromError, highlightedPipeIds, selectedPipeFeature } from "@/features/twin/gisAdapter";
@@ -22,21 +23,26 @@ import { useTwinSocket } from "@/features/twin/useTwinSocket";
 import {
   deriveStatus,
   fetchBands,
+  fetchCustomerDetail,
   fetchGisManifest,
   fetchGisNetwork,
   fetchImpact,
+  fetchImpactZones,
   fetchSec,
   fetchTopology,
   isPressureDrop,
   outgoingPipes,
 } from "@/features/twin/twinClient";
+import { mergeImpactResults } from "@/features/twin/impactView";
 import type {
   BandsResponse,
+  DemoCustomerDetail,
   DeviceLiveState,
   GisAvailability,
   GisManifest,
   GisNetwork,
   ImpactResponse,
+  ImpactZoneCollection,
   SecResponse,
   TwinEventFrame,
   TwinTopology,
@@ -92,6 +98,25 @@ export function OperationsTwinScreen(): JSX.Element {
   const [gisManifest, setGisManifest] = useState<GisManifest | null>(null);
   const [gisNetwork, setGisNetwork] = useState<GisNetwork | null>(null);
   const [gisPipe, setGisPipe] = useState<number | null>(null);
+
+  // The clickable low-pressure impact experience (PR-J). One shared drawer, opened from the
+  // footprint OR a highlighted pipe, in either view. The impact zone GeoJSON is fetched for the
+  // GIS canvas layer; the footprint affordance itself needs only `impact.zone`.
+  //
+  // Recovery clearing is RENDER-DERIVED, not an effect: the drawer is "open" only while
+  // `openForAsset` still names the CURRENTLY dropped asset. A recovery makes droppedAsset null, so
+  // the drawer closes with no clearing setState (the codebase's derive-don't-store convention).
+  // The asset id (not the impact object) is the identity BECAUSE the resync poll re-fetches impact
+  // into a fresh object mid-incident — a reference key would spuriously close the open drawer.
+  const [openForAsset, setOpenForAsset] = useState<string | null>(null);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+  // The SETTLED detail outcome for one customer: `{id, detail}` (detail null = the fetch failed).
+  // Keyed by id so we can distinguish "still loading" from "loaded-but-failed" — a plain
+  // `detail | null` conflates them and spins forever on a 404/500 (QCHECK round 4).
+  const [detailState, setDetailState] =
+    useState<{ readonly id: string; readonly detail: DemoCustomerDetail | null } | null>(null);
+  const [detailRetry, setDetailRetry] = useState(0);
+  const [impactZone, setImpactZone] = useState<ImpactZoneCollection | null>(null);
 
   // Topology + bands: on mount, on every socket (re)open (generation bump), and on the resync
   // poll below — the belt to the reconnect braces, so a long-lived session cannot drift.
@@ -238,20 +263,10 @@ export function OperationsTwinScreen(): JSX.Element {
       try {
         const results = await Promise.all(pipeIds.map((id) => fetchImpact(id)));
         if (token !== impactReq.current) return; // a newer drop/clear superseded this
-        const seen = new Map<string, ImpactResponse["customers"][number]>();
-        const affected = new Set<string>();
-        for (const r of results) {
-          for (const id of r.affected_pipe_ids) affected.add(id);
-          for (const c of r.customers) seen.set(c.customer_id, c);
-        }
-        const customers = [...seen.values()].sort((a, b) => a.customer_id.localeCompare(b.customer_id));
-        setImpact({
-          pipe_id: pipeIds[0],
-          affected_pipe_ids: [...affected],
-          customers,
-          count: customers.length,
-          simulated: true,
-        });
+        // Merge/dedupe across the dropped asset's outgoing pipes, preserving enriched provenance
+        // order-independently (PR-J R20 — see mergeImpactResults). The footprint renders only when
+        // `zone` survives, and the breakdown must be exact regardless of per-pipe result order.
+        setImpact(mergeImpactResults(results, pipeIds[0]));
         setImpactAsset(droppedAsset);
       } catch {
         if (token === impactReq.current) setImpactAsset(null);
@@ -291,6 +306,97 @@ export function OperationsTwinScreen(): JSX.Element {
   );
   const displayedSec = selected != null && sec?.asset_id === selected ? sec : null;
   const secLoading = selected != null && (sec == null || sec.asset_id !== selected);
+
+  // ── PR-J: clickable low-pressure impact wiring ─────────────────────────────────────────
+  // Opening the drawer binds it to the CURRENTLY dropped asset and resets any prior row selection
+  // (open to the list, never a stale detail). setState in an event handler — not an effect — so
+  // recovery clearing stays render-derived.
+  const openImpactDrawer = useCallback((): void => {
+    setSelectedCustomerId(null);
+    setOpenForAsset(droppedAsset);
+  }, [droppedAsset]);
+  // Derived detail view-state (like SEC): a settled outcome counts only when its id matches the
+  // current selection. `loading` = no settled outcome yet; `error` = settled but failed (detail
+  // null) — so a failure shows an explicit retry, never a permanent spinner.
+  const detailSettled = detailState?.id === selectedCustomerId ? detailState : null;
+  const customerDetail = detailSettled?.detail ?? null;
+  const detailLoading = selectedCustomerId != null && detailSettled == null;
+  const detailError = detailSettled != null && detailSettled.detail == null;
+  const retryDetail = useCallback((): void => {
+    setDetailState(null); // back to the loading state
+    setDetailRetry((n) => n + 1); // re-trigger the fetch effect for the same id
+  }, []);
+
+  // The impact zone GeoJSON for the GIS canvas layer. setState only inside the async, so this is
+  // not a synchronous effect setState. The value is gated at the render site by `activeImpact`,
+  // so a recovery (or a late arrival after recovery) never leaves a footprint on the map.
+  const zoneAvailable = activeImpact?.zone != null;
+  useEffect(() => {
+    if (!zoneAvailable) return;
+    const ac = new AbortController();
+    void (async (): Promise<void> => {
+      try {
+        const zones = await fetchImpactZones(undefined, ac.signal);
+        if (!ac.signal.aborted) setImpactZone(zones);
+      } catch {
+        // The footprint affordance falls back to `impact.zone`; the map layer is simply absent.
+      }
+    })();
+    return () => ac.abort();
+  }, [zoneAvailable]);
+
+  // Customer detail: a real AbortController per selection (PR-J R21). A newer selection aborts
+  // the in-flight request in cleanup, so its late response is dropped (the aborted-signal guard);
+  // detailLoading (derived above) hides the previous customer's card while the new one loads.
+  useEffect(() => {
+    if (selectedCustomerId == null) return;
+    const id = selectedCustomerId;
+    const ac = new AbortController();
+    void (async (): Promise<void> => {
+      try {
+        const detail = await fetchCustomerDetail(id, ac.signal);
+        if (!ac.signal.aborted) setDetailState({ id, detail }); // settled OK
+      } catch {
+        if (!ac.signal.aborted) setDetailState({ id, detail: null }); // settled FAILED → error UI
+      }
+    })();
+    return () => ac.abort();
+  }, [selectedCustomerId, detailRetry]);
+
+  // Recovery ends the incident (droppedAsset → null). EXPLICITLY clear ALL incident state (both
+  // QCHECK tiers; R12/R21/R22) so a later SAME-asset re-drop cannot silently reopen the drawer with
+  // a stale customer/zone, and so the stale impact object cannot flash on re-drop. Resetting
+  // `selectedCustomerId`/`zoneAvailable` re-runs the detail/zone effects' cleanups, aborting any
+  // in-flight request. This null-transition is only observable via an effect and cannot be derived
+  // (the resync poll churns the impact object mid-incident); the reset is idempotent and cannot
+  // cascade (its guard is false once it has run).
+  const clearRecoveredImpact = useCallback((): void => {
+    setOpenForAsset(null);
+    setSelectedCustomerId(null);
+    setDetailState(null);
+    setImpactZone(null);
+    setImpactAsset(null);
+  }, []);
+  useEffect(() => {
+    // Clear on recovery (droppedAsset → null) AND when the incident MOVES to a different asset
+    // while a drawer is open for the old one (openForAsset no longer matches). The latter is
+    // unreachable in the current single-asset (P-2-only) demo, but closing it unconditionally
+    // keeps the same-asset-reopen defence sound for any future multi-asset scenario. Idempotent
+    // and non-cascading: once openForAsset is null, the second clause is false.
+    if (droppedAsset == null || (openForAsset != null && openForAsset !== droppedAsset)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional reset-on-recovery (above)
+      clearRecoveredImpact();
+    }
+  }, [droppedAsset, openForAsset, clearRecoveredImpact]);
+
+  // The bound pipe highlighted while its scenario asset is the active drop. Passed both as the
+  // map's highlight filter AND (via the ref inside GisNetworkView) as the set whose LINE click
+  // opens the drawer — the device marker stays a details-only affordance.
+  const highlightedGis = useMemo(
+    () =>
+      gisManifest != null ? highlightedPipeIds(gisManifest.demo_binding, droppedAsset) : [],
+    [gisManifest, droppedAsset],
+  );
 
   const stale = connection === "reconnecting" || connection === "closed" || connection === "disabled";
   const statuses = useMemo(
@@ -346,10 +452,11 @@ export function OperationsTwinScreen(): JSX.Element {
                 affectedPipeIds={affectedPipeIds}
                 selected={selected}
                 onSelect={setSelected}
+                onOpenImpact={openImpactDrawer}
               />
               <div className="flex flex-col gap-4">
                 {selected != null && <SecTooltip assetId={selected} sec={displayedSec} loading={secLoading} />}
-                <ImpactPanel impact={activeImpact} loading={impactLoading} />
+                <ImpactPanel impact={activeImpact} loading={impactLoading} onOpenDrawer={openImpactDrawer} />
                 {/* Renders ONLY when the API reports DEMO_CONTROLS on (self-hiding). */}
                 <DemoScenarioPanel />
               </div>
@@ -366,11 +473,7 @@ export function OperationsTwinScreen(): JSX.Element {
                   ? statusOf(gisManifest.demo_binding.scenario_asset_id)
                   : "nodata"
               }
-              highlighted={
-                gisManifest != null
-                  ? highlightedPipeIds(gisManifest.demo_binding, droppedAsset)
-                  : []
-              }
+              highlighted={highlightedGis}
               gisPipe={gisPipe}
               onSelectPipe={setGisPipe}
               selected={selected}
@@ -378,6 +481,8 @@ export function OperationsTwinScreen(): JSX.Element {
               secLoading={secLoading}
               activeImpact={activeImpact}
               impactLoading={impactLoading}
+              onOpenImpact={openImpactDrawer}
+              impactZone={activeImpact != null ? impactZone : null}
               />
             </div>
           )}
@@ -385,6 +490,23 @@ export function OperationsTwinScreen(): JSX.Element {
             <SimulatedBadge /> ค่าการวัดทั้งหมดเป็นข้อมูลจำลอง; ที่ตั้งสาขาเป็นข้อมูลจริงของ กปภ.
           </footer>
         </div>
+      )}
+      {/* One shared impact drawer at the screen root — reachable from both views (PR-J). Mounted
+          only while its incident is still the active one, so recovery (activeImpact → null) and a
+          re-drop (a fresh impact object) both close it with no clearing effect, and each open
+          mounts fresh (filter/page reset to defaults). */}
+      {activeImpact != null && openForAsset === droppedAsset && (
+        <AffectedCustomerDrawer
+          impact={activeImpact}
+          open={true}
+          onClose={() => setOpenForAsset(null)}
+          selectedCustomerId={selectedCustomerId}
+          detail={customerDetail}
+          detailLoading={detailLoading}
+          detailError={detailError}
+          onRetryDetail={retryDetail}
+          onSelectCustomer={setSelectedCustomerId}
+        />
       )}
     </div>
   );
@@ -404,6 +526,8 @@ interface GisViewSectionProps {
   readonly secLoading: boolean;
   readonly activeImpact: ImpactResponse | null;
   readonly impactLoading: boolean;
+  readonly onOpenImpact: () => void;
+  readonly impactZone: ImpactZoneCollection | null;
 }
 
 /**
@@ -427,6 +551,8 @@ function GisViewSection({
   secLoading,
   activeImpact,
   impactLoading,
+  onOpenImpact,
+  impactZone,
 }: GisViewSectionProps): JSX.Element {
   if (availability === "idle" || availability === "loading") {
     return <Skeleton className="mt-4 h-[560px] w-full" />;
@@ -489,6 +615,8 @@ function GisViewSection({
             markerStatus={markerStatus}
             highlightedPipeIds={highlighted}
             onSelectPipe={onSelectPipe}
+            impactZone={impactZone}
+            onOpenImpact={onOpenImpact}
           />
         </Suspense>
       </LazyChunkBoundary>
@@ -505,7 +633,7 @@ function GisViewSection({
           feature={selectedPipeFeature(network, gisPipe)}
           boundPipeId={manifest.demo_binding.pipe_id}
         />
-        <ImpactPanel impact={activeImpact} loading={impactLoading} />
+        <ImpactPanel impact={activeImpact} loading={impactLoading} onOpenDrawer={onOpenImpact} />
         <TwinProvenanceLegend />
         <DemoScenarioPanel />
       </div>

@@ -7,16 +7,25 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import type { StatusKind } from "@/components/StatusChip";
 
 import { GIS_CONFIG } from "./gis.config";
-import { focusBounds, highlightFilter, resolveCssColor } from "./gisAdapter";
+import { focusBounds, highlightFilter, impactZoneGeoJson, resolveCssColor } from "./gisAdapter";
 import { GisDeviceMarker } from "./GisDeviceMarker";
-import type { GisManifest, GisNetwork } from "./types";
+import type { GisManifest, GisNetwork, ImpactZoneCollection } from "./types";
 
 export interface GisNetworkViewProps {
   readonly manifest: GisManifest;
   readonly network: GisNetwork;
   readonly markerStatus: StatusKind;
   readonly highlightedPipeIds: readonly number[];
+  /** Select a pipe for its REAL attribute details (a NON-highlighted line click, or the device
+   *  marker — the marker ALWAYS shows details, never the drawer, so its PR-H behaviour is intact
+   *  during an incident). */
   readonly onSelectPipe: (pipeId: number | null) => void;
+  /** The SIMULATED low-pressure footprint to draw, or null (PR-J). Created empty at load and fed
+   *  in via `setData`, so a footprint arriving after mount always has a source to update. */
+  readonly impactZone?: ImpactZoneCollection | null;
+  /** Open the affected-customer drawer (PR-J, source step 4). Fired by a click on the footprint
+   *  fill OR on a HIGHLIGHTED pipe line — the two on-map entry points to the incident. */
+  readonly onOpenImpact?: () => void;
 }
 
 /**
@@ -36,6 +45,8 @@ export function GisNetworkView({
   markerStatus,
   highlightedPipeIds,
   onSelectPipe,
+  impactZone = null,
+  onOpenImpact,
 }: GisNetworkViewProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
   // The marker element is deliberately NOT part of this component's JSX tree: maplibre
@@ -68,6 +79,16 @@ export function GisNetworkView({
   useEffect(() => {
     selectRef.current = onSelectPipe;
   }, [onSelectPipe]);
+  const openImpactRef = useRef(onOpenImpact);
+  useEffect(() => {
+    openImpactRef.current = onOpenImpact;
+  }, [onOpenImpact]);
+  // The live highlighted set, read by the once-registered line-click handler so a HIGHLIGHTED pipe
+  // opens the drawer while any other pipe shows details — without re-registering the listener.
+  const highlightedRef = useRef(highlightedPipeIds);
+  useEffect(() => {
+    highlightedRef.current = highlightedPipeIds;
+  }, [highlightedPipeIds]);
   const initialRef = useRef({ manifest, network });
 
   useEffect(() => {
@@ -144,6 +165,34 @@ export function GisNetworkView({
           "line-width": GIS_CONFIG.highlightWidth,
         },
       });
+      // The SIMULATED low-pressure footprint (PR-J): source + layers created EMPTY here so a
+      // footprint that arrives AFTER the map mounts (the judge triggers the drop while already on
+      // the GIS view) always has a source to `setData` on. Non-colour encoding: a dashed outline
+      // over a translucent fill. Colours resolve from a token (omitted when unresolvable).
+      map.addSource(GIS_CONFIG.zoneSourceId, { type: "geojson", data: impactZoneGeoJson(null) });
+      const zoneColor = resolveCssColor(GIS_CONFIG.colorTokens.zone);
+      map.addLayer({
+        id: GIS_CONFIG.zoneFillLayerId,
+        type: "fill",
+        source: GIS_CONFIG.zoneSourceId,
+        paint: {
+          ...(zoneColor != null ? { "fill-color": zoneColor } : {}),
+          "fill-opacity": GIS_CONFIG.zoneFillOpacity,
+        },
+      });
+      map.addLayer({
+        id: GIS_CONFIG.zoneLineLayerId,
+        type: "line",
+        source: GIS_CONFIG.zoneSourceId,
+        paint: {
+          ...(zoneColor != null ? { "line-color": zoneColor } : {}),
+          "line-width": GIS_CONFIG.zoneLineWidth,
+          "line-dasharray": [...GIS_CONFIG.zoneDash],
+        },
+      });
+      map.on("click", GIS_CONFIG.zoneFillLayerId, () => {
+        openImpactRef.current?.();
+      });
       const bounds = focusBounds(initial.manifest);
       if (bounds != null) {
         map.fitBounds(
@@ -160,7 +209,15 @@ export function GisNetworkView({
       }
       map.on("click", GIS_CONFIG.lineLayerId, (event: maplibregl.MapLayerMouseEvent) => {
         const raw: unknown = event.features?.[0]?.properties?.pipe_id;
-        selectRef.current(typeof raw === "number" ? raw : null);
+        const pipeId = typeof raw === "number" ? raw : null;
+        // A click on a HIGHLIGHTED pipe (downstream of the active drop) opens the impact drawer
+        // (source step 4); any other pipe shows its REAL attributes. The device marker is a
+        // separate affordance and ALWAYS shows details (its onClick calls selectRef directly).
+        if (pipeId != null && highlightedRef.current.includes(pipeId)) {
+          openImpactRef.current?.();
+        } else {
+          selectRef.current(pipeId);
+        }
       });
       setLoaded(true);
     });
@@ -171,6 +228,17 @@ export function GisNetworkView({
     const marker = new maplibregl.Marker({ element: markerEl, anchor: "bottom" })
       .setLngLat([lon, lat])
       .addTo(map);
+    // The marker is a DETAILS-only affordance: a NATIVE click listener on its portal host does the
+    // details selection AND stopPropagation, so the click can never bubble to maplibre's
+    // canvas-container listener (which would hit-test the click point against the zone-fill /
+    // highlighted-line layers and wrongly open the drawer — QCHECK round 4 HIGH). A React onClick
+    // would run at the delegated root only AFTER maplibre already handled the bubbled event, so
+    // native handling here is load-bearing, not a style choice.
+    const onMarkerClick = (event: Event): void => {
+      event.stopPropagation();
+      selectRef.current(initial.manifest.demo_binding.pipe_id);
+    };
+    markerEl.addEventListener("click", onMarkerClick);
     // A theme change re-resolves light-dark() tokens — via the header toggle (stamps
     // `data-theme` on <html>) OR the OS flipping while the app follows it, which
     // mutates NO attribute; both paths must repaint the canvas from the same tokens.
@@ -188,6 +256,7 @@ export function GisNetworkView({
     return () => {
       observer.disconnect();
       osScheme?.removeEventListener("change", onOsFlip);
+      markerEl.removeEventListener("click", onMarkerClick);
       // A half-initialized map (failed GPU init) throws from remove(); that TypeError
       // inside an effect cleanup would hit the router's error boundary and take the
       // WORKING logical twin down with it. The failure is already surfaced as the
@@ -216,6 +285,17 @@ export function GisNetworkView({
       highlightFilter(highlightedPipeIds) as maplibregl.FilterSpecification,
     );
   }, [highlightedPipeIds, loaded]);
+
+  // Feed the footprint into its pre-created source in place (never a remount). A null zone sets
+  // an empty collection, so recovery clears the drawn footprint (PR-J R22).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map == null || !loaded) return;
+    const source = map.getSource(GIS_CONFIG.zoneSourceId) as maplibregl.GeoJSONSource | undefined;
+    source?.setData(
+      impactZoneGeoJson(impactZone) as Parameters<maplibregl.GeoJSONSource["setData"]>[0],
+    );
+  }, [impactZone, loaded]);
 
   return (
     <div
@@ -246,10 +326,11 @@ export function GisNetworkView({
       )}
       {!mapFailed &&
         createPortal(
+          // No React onClick: the details click is handled by the native listener on markerEl
+          // (see the mount effect) so it can stopPropagation before maplibre's canvas listener.
           <GisDeviceMarker
             assetId={manifest.demo_binding.scenario_asset_id}
             status={markerStatus}
-            onClick={() => selectRef.current(manifest.demo_binding.pipe_id)}
           />,
           markerEl,
         )}
@@ -301,5 +382,14 @@ function repaintFromTokens(map: maplibregl.Map | null): void {
   const highlight = resolveCssColor(GIS_CONFIG.colorTokens.highlight);
   if (highlight != null && map.getLayer(GIS_CONFIG.highlightLayerId) != null) {
     map.setPaintProperty(GIS_CONFIG.highlightLayerId, "line-color", highlight);
+  }
+  const zone = resolveCssColor(GIS_CONFIG.colorTokens.zone);
+  if (zone != null) {
+    if (map.getLayer(GIS_CONFIG.zoneFillLayerId) != null) {
+      map.setPaintProperty(GIS_CONFIG.zoneFillLayerId, "fill-color", zone);
+    }
+    if (map.getLayer(GIS_CONFIG.zoneLineLayerId) != null) {
+      map.setPaintProperty(GIS_CONFIG.zoneLineLayerId, "line-color", zone);
+    }
   }
 }

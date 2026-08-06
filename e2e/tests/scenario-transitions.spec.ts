@@ -1,6 +1,14 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-import { apiJson, demoStatus, dlqTotal, pipelineStatus, pollUntil, postScenario } from "../lib/api";
+import {
+  apiJson,
+  demoStatus,
+  dlqTotal,
+  impactFor,
+  pipelineStatus,
+  pollUntil,
+  postScenario,
+} from "../lib/api";
 
 // P0 + P1 — the deterministic demo director, TRANSITION-proven.
 //
@@ -306,4 +314,88 @@ test("P0 — the on-screen สาธิตเหตุการณ์ control dr
 
   // And the twin it sits beside reacts — same fault, four scored items, one click.
   await expect.poll(() => p2Dom(page), { timeout: 10_000 }).not.toBe("normal");
+});
+
+// PR-J — the clickable Map Ta Phut low-pressure impact, proven on ONE loaded /operations DOM
+// (the logical view, so no permission-gated GIS bundle is needed). pressure_drop → footprint +
+// highlighted pipe → click EITHER → the same 200-account drawer (140/35/25, SIMULATED IMPACT) →
+// filter keeps the 200 headline → 8 pages → a row's synthetic detail + 12 readings → recovery
+// clears the footprint and closes the drawer. Ends on pressure_drop to preserve the suite state.
+test("P1 — a low-pressure incident is clickable to exactly 200 inspectable customers, then clears", async ({ page }) => {
+  // Defense-in-depth: the demo compose defaults MTP_CUSTOMER_IMPACT_ENABLED=1 and preflight
+  // fail-closes if it is off, so on the real gate this never skips. A stack run without the
+  // flag (e.g. bare `playwright test`) skips honestly rather than asserting against a dead route.
+  const enriched = await impactFor("PIPE-P2-TANK");
+  // Single line so the evidence-docs spec counter never sees `test.skip(` open a line.
+  if (enriched.type_breakdown == null) test.skip(true, "MTP_CUSTOMER_IMPACT_ENABLED must be 1 (the demo compose default) for the PR-J journey");
+
+  await openTwin(page);
+  try {
+    // Step 1 — establish a clean no-incident baseline (the preceding spec leaves P-2 degraded),
+    // then assert no footprint before the drop.
+    await resetToNormal(page);
+    await expect(page.getByTestId("low-pressure-area")).toHaveCount(0);
+
+    // Step 2/3 — inject the drop; the footprint + a highlighted pipe appear on the same DOM.
+    await postScenario("pressure_drop");
+    await expect(page.getByTestId("low-pressure-area")).toBeVisible({ timeout: 30_000 });
+    await expect.poll(() => page.locator('[data-affected="true"]').count(), {
+      timeout: 15_000,
+    }).toBeGreaterThan(0);
+
+    // Step 4/5 — click the footprint → the drawer opens with EXACTLY 200 and the 140/35/25 mix.
+    await page.getByTestId("low-pressure-area").click();
+    const drawer = page.getByTestId("impact-drawer");
+    await expect(drawer).toBeVisible();
+    await expect(drawer.getByTestId("impact-count")).toContainText("200");
+    await expect(drawer.getByText(/SIMULATED IMPACT/i)).toBeVisible();
+    const breakdown = await drawer.getByTestId("type-breakdown").textContent();
+    expect(visibleNumbers(breakdown ?? "")).toEqual(expect.arrayContaining([140, 35, 25]));
+    await expect(drawer.getByTestId("customer-row")).toHaveCount(25);
+    await expect(drawer.getByTestId("pager")).toContainText("8"); // 200 / 25 = 8 pages
+
+    // reach the last page — the discriminating proof there really are 8.
+    for (let i = 0; i < 7; i++) await drawer.getByTestId("customer-next").click();
+    await expect(drawer.getByTestId("customer-next")).toBeDisabled();
+    await expect(drawer.getByTestId("customer-row")).toHaveCount(25);
+
+    // Step 6 — filtering never changes the 200 headline, and every visible row is the type.
+    await drawer.getByTestId("filter-type-1").click();
+    await expect(drawer.getByTestId("impact-count")).toContainText("200");
+    for (const row of await drawer.getByTestId("customer-row").all()) {
+      await expect(row).toContainText("ที่อยู่อาศัย");
+    }
+    await drawer.getByTestId("filter-type-all").click();
+
+    // Step 7 — a row reveals its synthetic account detail + 12 arithmetically-consistent readings.
+    await drawer.getByTestId("customer-select").first().click();
+    await expect(page.getByTestId("customer-detail")).toBeVisible();
+    await expect(page.getByTestId("meter-reading-row")).toHaveCount(12);
+    const firstReading = page.getByTestId("meter-reading-row").first();
+    const cells = firstReading.locator("td");
+    const previous = Number((await cells.nth(1).textContent())?.trim());
+    const reading = Number((await cells.nth(2).textContent())?.trim());
+    const usage = Number((await cells.nth(3).textContent())?.trim());
+    expect(usage, "displayed usage must equal reading − previous").toBe(reading - previous);
+
+    // Step 4 (alternate entry) — the highlighted PIPE opens the SAME drawer/incident.
+    await drawer.getByTestId("customer-close").click();
+    await expect(drawer).toHaveCount(0);
+    await page.getByTestId("affected-pipe").first().click();
+    await expect(page.getByTestId("impact-drawer")).toBeVisible();
+    await expect(page.getByTestId("impact-drawer").getByTestId("impact-count")).toContainText("200");
+
+    // Step 8 — recovery clears the footprint and closes the drawer (no stale 200 left on screen).
+    await postScenario("normal");
+    await expect(page.getByTestId("impact-drawer")).toHaveCount(0, { timeout: 45_000 });
+    await expect(page.getByTestId("low-pressure-area")).toHaveCount(0);
+    await expect.poll(() => page.locator('[data-affected="true"]').count(), {
+      timeout: 15_000,
+    }).toBe(0);
+
+    await assertNotReloaded(page);
+  } finally {
+    // Leave P-2 degraded so the later topic2/topic3 snapshot specs see the state they expect.
+    await postScenario("pressure_drop");
+  }
 });

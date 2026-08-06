@@ -14,6 +14,15 @@ export const GIS_CONFIG = {
   /** The highlight layer for the bound pipe during its asset's pressure drop. */
   highlightLayerId: "pipe-ry-highlight",
 
+  /** MapLibre source + layers for the SIMULATED low-pressure footprint (PR-J). The footprint
+   *  is encoded by a DASHED outline (non-colour) + a translucent fill — never a solid colour. */
+  zoneSourceId: "mtp-lpz",
+  zoneFillLayerId: "mtp-lpz-fill",
+  zoneLineLayerId: "mtp-lpz-outline",
+  zoneFillOpacity: 0.18,
+  zoneLineWidth: 2,
+  zoneDash: [2, 2],
+
   /** fitBounds padding (px) around the Map Ta Phut focus extent. */
   fitPadding: 48,
   /** Zoom ceiling: past this, sub-metre GPS noise reads as fake precision. */
@@ -29,5 +38,7 @@ export const GIS_CONFIG = {
     line: "--color-on-surface-variant",
     highlight: "--color-status-critical",
     selected: "--color-primary",
+    /** The low-pressure footprint (warning). Non-colour encoding = dashed outline + fill. */
+    zone: "--color-status-warning",
   },
 } as const;

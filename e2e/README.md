@@ -40,7 +40,13 @@ the repository Compose file, project `pwa-demo`, API `http://localhost:8000`, an
 
 `tests/topic1-pipeline.spec.ts` (1.1–1.5), `topic2-twin.spec.ts` (2.1–2.5),
 `topic3-predictive.spec.ts` (3.1–3.6 + a global SIMULATED-marker check), and
-`scenario-transitions.spec.ts` (the PR #30 demo-director transitions)
+`scenario-transitions.spec.ts` (the PR #30 demo-director transitions **plus the PR-J clickable
+low-pressure journey**: a drop → the `พื้นที่แรงดันต่ำจำลอง` footprint / highlighted pipe → one
+200-account drawer (140/35/25, SIMULATED IMPACT) → 25-row/8-page pagination → a type filter that
+keeps the 200 headline → a row's synthetic detail + 12 readings → recovery clears it. The demo
+compose defaults `MTP_CUSTOMER_IMPACT_ENABLED=1` and `scripts/demo-preflight.sh` fail-closes if the
+enriched routes are dark, so the journey runs on the standard `make demo-e2e`; a stack run without
+the flag self-skips it honestly.)
 
 `topic2-gis.spec.ts` (PR-H): the dark-landing UX runs on EVERY stack (on a GIS-enabled
 stack the GIS endpoints are route-stubbed to 404 for that one test); the four

@@ -4,7 +4,10 @@ import { STATUS_LABEL_TH, StatusChip, type StatusKind } from "@/components/Statu
 export interface GisDeviceMarkerProps {
   readonly assetId: string;
   readonly status: StatusKind;
-  readonly onClick: () => void;
+  /** Optional: inside GisNetworkView the click is handled by a NATIVE listener on the marker's
+   *  portal host (so it can stopPropagation before maplibre's canvas-container listener); standalone
+   *  callers may still pass a React handler. */
+  readonly onClick?: () => void;
 }
 
 /**
