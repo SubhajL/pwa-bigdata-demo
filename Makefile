@@ -6,7 +6,7 @@ COMPOSE_PROJECT_NAME ?= pwa-demo
 export COMPOSE_FILE_PATH COMPOSE_PROJECT_NAME
 COMPOSE := docker compose --file $(COMPOSE_FILE_PATH) --project-name $(COMPOSE_PROJECT_NAME)
 
-.PHONY: help demo-up demo-down demo-preflight demo-reconnect demo-scenario e2e-setup demo-e2e demo-acceptance-3x demo-e2e-cold gis-build
+.PHONY: help demo-up demo-down demo-preflight demo-reconnect demo-scenario e2e-setup demo-e2e demo-acceptance-3x demo-rehearsal demo-e2e-cold gis-build
 
 help: ## list the demo targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-16s %s\n", $$1, $$2}'
@@ -50,6 +50,9 @@ gis-build: ## build the local pipe-GIS bundle: make gis-build GIS_SOURCE='/path/
 
 demo-acceptance-3x: ## Gate A1: THREE consecutive score-gate runs + exact-SHA evidence manifest (warm; volumes preserved)
 	RUNS=3 scripts/demo-acceptance.sh
+
+demo-rehearsal: ## Gate A2 judge rehearsal: drive the literal sequence + archive the 4 timings (SHA/hash-stamped)
+	scripts/demo-rehearsal.sh
 
 # The acceptance runner owns the confirmed reset and the gate in ONE execution. There is no
 # caller-minted capability between them, and its internal guard remains immune to `make -i`.
