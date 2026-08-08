@@ -46,3 +46,6 @@ data/curated/pipe_ry/
 # the harness is committed, its run artifacts are not. Keep the .gitkeep placeholder.
 evidence/*
 !evidence/.gitkeep
+
+# Claude Code local settings (personal; never committed) — must not dirty acceptance
+.claude/settings.local.json
