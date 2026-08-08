@@ -9,23 +9,41 @@ Honest status of the scored 100-point demo. Read with `POC_SPEC.md` §4A (the ru
 
 **Status legend:** ✅ done · ◑ partial · ❌ not yet.
 
-**Refreshed 2026-08-05 with PR-D/PR-E.** The three demo topics are on screen (topic ๒ = PR-7,
+**Refreshed 2026-08-08 (closure).** The three demo topics are on screen (topic ๒ = PR-7,
 topic ๑ = PR-8, topic ๓ = PR-9), and all 16 scored items have implementation paths connected to
 their runtime entry points: **16/16 built and wired**. The current warm Playwright suite (37 specs
 including the demo-director transitions and the PR-J click-to-200 journey; the six
 `PIPE_GIS_ENABLED`-gated proofs in `topic2-gis.spec.ts` — the four real-geometry proofs plus two
 PR-J GIS-view checks — self-skip while GIS is off — PR-H lands dark) protects the strongest live paths, including the timed
 band `warning` → model `critical` → recovery sequence and the literal operator/DOM oracles for
-topic ๓; their exact-merged-SHA acceptance remains Gate A1's.
+topic ๓; their exact-merged-SHA acceptance is recorded below.
 
-**Gate A1 pending.** PR-D delivers the complete judge-visible loaded-model artifact SHA and
+**Gate A1 ACCEPTED @ `b596846`** — a complete single-SHA acceptance (warm 3× + approved cold run;
+core evidence; `PIPE_GIS_ENABLED=0`), corroborated by a retained checksum-valid evidence archive.
+Gate A1 postdates PR-D/PR-E/PR-F, so it **closed the five formerly-pending Topic-3 rows**
+(3.1/3.2/3.4/3.5/3.6): PR-D delivered the complete judge-visible loaded-model artifact SHA and
 displayed dataset-value oracles for 3.1–3.2 (API/UI/preflight share one hash of the exact loaded
 bytes; the card exposes all 64 digest characters and tiles expose both the literal served values
-and the judge-visible numbers); their exact-SHA acceptance run remains
-Gate A1's. PR-E delivers Swagger Try-it-out persistence (with DB-side verification and harness
-cleanup), first-three DOM/API worklist correspondence, and induced rendered RCA variation for
-3.4–3.6. Until Gate A1 runs at one exact merged SHA, this matrix must not be promoted to a
-complete E2E-readiness claim.
+and the judge-visible numbers), and PR-E delivered Swagger Try-it-out persistence (with DB-side
+verification and harness cleanup), first-three DOM/API worklist correspondence, and induced
+rendered RCA variation for 3.4–3.6. It does **not** accept the later PR-I/PR-J work: at `b596846`,
+item 2.4 was the pre-PR-J proof, so the current clickable 200-customer 2.4 is Gate A2's, below.
+
+**Gate A2 — the final merged-main bundle (the whole post-PR-I/PR-J matrix) at one exact SHA — is
+NOT yet certified at a single SHA; it is re-run at this closure SHA (Path 2).** Its evidence exists
+historically but is SPLIT across SHAs and operator-reported (no retained acceptance manifest in
+this repo): a warm three-run §7 acceptance at `c67bd54` (operator-reported 31 pass / 6 skip;
+`PIPE_GIS_ENABLED=0`; three §7 runs exit 0; `demo-acceptance/v2` manifest clean) and the
+judge-sequence rehearsal with archived timings at `9a6c83c` (#46, retained archive, certified on
+clean `main`). Because the rehearsal harness landed AFTER the `c67bd54` run, neither SHA carries
+the complete Gate A2 bundle. **A changed candidate re-opens acceptance:** any tree change
+(including this closure PR) re-runs the full warm §7 acceptance AND the rehearsal at its own merged
+SHA, producing the retained, auditable manifest that finally binds Gate A2 to one exact SHA.
+
+**Still open, optional and gated (not scored):** activating the REAL Rayong/Map Ta Phut geometry
+(`PIPE_GIS_ENABLED=1`) awaits recorded data-owner redistribution permission; a true-cold
+(`CONFIRM_VOLUME_RESET=1`) acceptance runs only under explicit destructive authorization. Neither
+blocks the five Topic-3 rows accepted (Gate A1) at `PIPE_GIS_ENABLED=0`.
 
 ---
 
@@ -43,21 +61,24 @@ complete E2E-readiness claim.
 | 2.3 | Pump anomaly + SEC tooltip (10) | ✅ (induced anomaly + on-screen recomputable derivation) | PR-7, PR-C | `topic2 2.3` + `scenario anomaly` |
 | 2.4 | Pressure drop → clickable footprint/pipe → 200-customer drawer + 12-reading detail (10) | ✅ clickable (200 · 140/35/25) | PR-7 + **PR-J** | `scenario-transitions` (PR-J journey) |
 | 2.5 | Source code: config + ≥3 components (5) | ✅ | PR-0 → PR-7 → PR-9 | `topic2 2.5` |
-| 3.1 | Trained model file + algorithm + params (5) | ◑ built/wired; complete visible loaded-artifact SHA oracle delivered (PR-D); exact-SHA acceptance pending Gate A1 | PR-4, `/api/model` PR-9 | `topic3 3.1` + `3.1b` |
-| 3.2 | Health/PTTF vary across ≥2 datasets (5) | ◑ built/wired; displayed dataset-value oracle delivered (PR-D); exact-SHA acceptance pending Gate A1 | PR-4, `/api/model` PR-9 | `topic3 3.2` (DOM↔API literal + visible) |
+| 3.1 | Trained model file + algorithm + params (5) | ✅ accepted (Gate A1); complete visible loaded-artifact SHA oracle delivered (PR-D) | PR-4, `/api/model` PR-9 | `topic3 3.1` + `3.1b` |
+| 3.2 | Health/PTTF vary across ≥2 datasets (5) | ✅ accepted (Gate A1); displayed dataset-value oracle delivered (PR-D) | PR-4, `/api/model` PR-9 | `topic3 3.2` (DOM↔API literal + visible) |
 | 3.3 | Health<threshold → twin change ≤30s (5) | ✅ bound in `test_scoring_cycle`; browser-observed in `scenario-transitions` | PR-4/PR-5/PR-7, #30 | `topic3 3.3` |
-| 3.4 | Feedback API via Swagger, persists (5) | ◑ built/wired; literal Swagger Try-it-out + DB persistence oracle delivered (PR-E); exact-SHA acceptance pending Gate A1 | PR-5, screen PR-9 | `topic3 3.4` + `3.4b` (Swagger↔DB row identity) |
-| 3.5 | Prioritized Worklist (5) | ◑ built/wired; first-three rendered↔API row oracle delivered (PR-E); exact-SHA acceptance pending Gate A1 | PR-5, screen PR-9 | `topic3 3.5` (first-three rendered↔API, visible cells) |
-| 3.6 | Root Cause Analysis (5) | ◑ built/wired; induced rendered-cause variation oracle delivered (PR-E); exact-SHA acceptance pending Gate A1 | PR-4/PR-5, screen PR-9 | `topic3 3.6` + `3.6b` (induced top-cause change) |
+| 3.4 | Feedback API via Swagger, persists (5) | ✅ accepted (Gate A1); literal Swagger Try-it-out + DB persistence oracle delivered (PR-E) | PR-5, screen PR-9 | `topic3 3.4` + `3.4b` (Swagger↔DB row identity) |
+| 3.5 | Prioritized Worklist (5) | ✅ accepted (Gate A1); first-three rendered↔API row oracle delivered (PR-E) | PR-5, screen PR-9 | `topic3 3.5` (first-three rendered↔API, visible cells) |
+| 3.6 | Root Cause Analysis (5) | ✅ accepted (Gate A1); induced rendered-cause variation oracle delivered (PR-E) | PR-4/PR-5, screen PR-9 | `topic3 3.6` + `3.6b` (induced top-cause change) |
 
 **Implementation coverage: 16/16 built and wired.** Current automated evidence is 37 Playwright
 specs, including a global SIMULATED-marker check, the demo-director transitions plus the PR-J
 clickable low-pressure journey in `scenario-transitions.spec.ts`, and the PR-H GIS view specs in
 `topic2-gis.spec.ts` (dark-landing UX always; the six `PIPE_GIS_ENABLED`-gated proofs — the four
 real-geometry proofs plus two PR-J GIS-view checks — run only on a locally GIS-enabled stack
-and are NOT part of scored evidence until data-owner permission is recorded). The PR-D/PR-E literal oracles are DELIVERED; Gate A1's
-exact-merged-SHA acceptance run remains the boundary between delivered evidence and accepted
-evidence. Design coverage: 15/16 have a mockup (2.5 needs none — it is the repo).
+and are NOT part of scored evidence until data-owner permission is recorded). The PR-D/PR-E literal
+oracles are DELIVERED and ACCEPTED at **Gate A1 @ `b596846`** (a complete single-SHA acceptance),
+which closed the five formerly-pending Topic-3 rows (3.1/3.2/3.4/3.5/3.6). The rest of the current
+matrix — notably the post-`b596846` PR-I/PR-J work behind item 2.4 — is accepted only at the final
+**Gate A2** (warm §7 3× + rehearsal at one exact SHA), which is re-run at this closure SHA (Path 2);
+a changed candidate re-runs it at its own merged SHA. Design coverage: 15/16 have a mockup (2.5 needs none — it is the repo).
 
 > **2.2 / 2.4 demo-data tuning (PR-7, landed 2026-08-01).** The score gate surfaced that the seed
 > produced no red device: a single below-band reading tops out at `warning` (`api/app/bands.py` —
@@ -95,12 +116,19 @@ These score in the **written 80% technical proposal**, not the live demo.
 
 - **Clickable app:** ✅ topic ๑/๒/๓ screens live and wired to the backend.
 - **Implementation:** ✅ 16/16 built and wired; the PR-D/PR-E literal oracles are delivered
-  (rows above), acceptance pending Gate A1.
-- **Acceptance:** ◑ Gate A1 pending; PR-F's remediated harness refreshes remote truth, rejects
-  dirty/stale or Git-context-substituted source, pins one candidate Compose stack/endpoints and
-  trusted make executable, and performs a confirmed cold reset in the same execution as its gate.
-  A warm `make demo-e2e` run remains rehearsal, not the final exact-SHA warm-three-run or
-  separately authorized true-cold result.
+  (rows above); their five Topic-3 rows are accepted at Gate A1.
+- **Acceptance:** ✅ **Gate A1 ACCEPTED @ `b596846`** — a complete single-SHA acceptance (warm 3× +
+  approved cold run; core evidence; `PIPE_GIS_ENABLED=0`) that closed the five formerly-pending
+  Topic-3 rows (3.1/3.2/3.4/3.5/3.6). ◑ **Gate A2** (the full post-PR-I/PR-J matrix, incl. item
+  2.4's clickable 200-customer proof) is not yet bound to one SHA: operator-reported warm §7 3×
+  evidence exists at `c67bd54` (31 pass / 6 skip; `demo-acceptance/v2` clean) and the rehearsal +
+  archived timings at `9a6c83c` (#46, retained), but — because the rehearsal landed after the
+  `c67bd54` run — the complete, auditable bundle is re-run at this closure SHA (Path 2). PR-F's
+  harness refreshes remote truth, rejects dirty/stale or Git-context-substituted source, pins one
+  candidate Compose stack/endpoints and trusted make executable, and performs a confirmed cold
+  reset in the same execution as its gate. **Still optional and separately gated:** the true-cold
+  (`CONFIRM_VOLUME_RESET=1`) result needs explicit destructive authorization, and REAL-geometry
+  activation (`PIPE_GIS_ENABLED=1`) needs recorded data-owner permission.
 - **Stack readiness:** Run `make demo-preflight` → `✓ DEMO READY`, then walk
-  `docs/demo-runbook.md`; this preflight result describes the running stack, not final evidence
-  acceptance.
+  `docs/demo-runbook.md`; a preflight result describes the running stack, and a changed candidate
+  re-runs warm acceptance at its own merged SHA.

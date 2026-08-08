@@ -41,3 +41,8 @@ e2e/.playwright/
 # PR-G: source-derived Rayong GIS bundle — stays local until the data owner records
 # redistribution permission (docs/data/pipe-ry-provenance.md). Never commit.
 data/curated/pipe_ry/
+
+# Rehearsal / acceptance evidence archives are runtime output (SHA/hash/timing-stamped);
+# the harness is committed, its run artifacts are not. Keep the .gitkeep placeholder.
+evidence/*
+!evidence/.gitkeep
